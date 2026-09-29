@@ -100,7 +100,7 @@
       const formatCurrency = value => new Intl.NumberFormat('id-ID',{style:'currency',currency:'IDR',maximumFractionDigits:0}).format(Math.round(value || 0));
       const formatCompact = value => {
         const amount = Math.round(value || 0);
-        if (Math.abs(amount) >= 1e9) return `Rp${(amount / 1e9).toLocaleString('id-ID',{maximumFractionDigits:1})} M`; 
+        if (Math.abs(amount) >= 1e9) return `Rp${(amount / 1e9).toLocaleString('id-ID',{maximumFractionDigits:1})} M`;
         if (Math.abs(amount) >= 1e6) return `Rp${(amount / 1e6).toLocaleString('id-ID',{maximumFractionDigits:1})} jt`;
         if (Math.abs(amount) >= 1e3) return `Rp${(amount / 1e3).toLocaleString('id-ID',{maximumFractionDigits:0})} rb`;
         return formatCurrency(amount);
@@ -153,6 +153,7 @@
       const save = () => { try { localStorage.setItem(STORAGE_KEY,JSON.stringify(transactions));localStorage.setItem(DEMO_STORAGE_KEY,String(isDemoData)); } catch { showToast('Penyimpanan penuh. Ekspor data Anda untuk membuat salinan.'); } };
       const PRODUCT_STORAGE_KEY='ruangusaha.products.v1';
       let products=[];
+      let posCart=[];
       let editingProductId=null;
       let needsSampleProductsSave=false;
       try{const storedProducts=JSON.parse(localStorage.getItem(PRODUCT_STORAGE_KEY));if(Array.isArray(storedProducts))products=storedProducts;else{products=sampleProducts();needsSampleProductsSave=true;}}catch{products=sampleProducts();needsSampleProductsSave=true;}
@@ -162,7 +163,104 @@
       try{const storedProfile=JSON.parse(localStorage.getItem(PROFILE_STORAGE_KEY));if(storedProfile&&typeof storedProfile==='object')profile={...profile,...storedProfile};}catch{}
       const saveProfile=()=>{try{localStorage.setItem(PROFILE_STORAGE_KEY,JSON.stringify(profile));}catch{showToast('Profil tidak dapat disimpan di perangkat ini.');}};
       const el = id => document.getElementById(id);
-      const currencyInputIds=['simulatorPrice','simulatorCapital','productPrice','productCost','restockCost','paymentAmount','entryAmount','entryCogs'];
+      document.head.insertAdjacentHTML('beforeend',`<style>
+        .pos-layout{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(300px,.8fr);align-items:start;gap:15px}
+        .pos-product-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(155px,1fr));gap:9px;padding:14px}
+        .pos-product{display:grid;gap:7px;min-height:105px;padding:12px;border:1px solid var(--line);border-radius:6px;background:#fff;color:var(--ink);text-align:left;transition:border-color .15s,background .15s}
+        .pos-product:hover:not(:disabled){border-color:#8bb99d;background:#f7fbf7}
+        .pos-product:disabled{cursor:not-allowed;opacity:.55}
+        .pos-product strong{font-size:12px;line-height:1.4}
+        .pos-product span{color:var(--muted);font-size:10px}
+        .pos-cart-panel{position:sticky;top:14px}
+        .pos-cart-count{color:var(--muted);font-size:10px}
+        .pos-cart-items{display:grid;gap:0;max-height:330px;overflow-y:auto;padding:0 15px}
+        .pos-cart-item{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;padding:12px 0;border-bottom:1px solid var(--line)}
+        .pos-cart-item:last-child{border-bottom:0}
+        .pos-item-name{font-size:11px;font-weight:700}
+        .pos-item-subtotal{margin-top:4px;color:var(--muted);font-size:10px}
+        .pos-quantity{display:flex;align-items:center;gap:6px}
+        .pos-quantity button{width:27px;height:27px;border:1px solid var(--line);border-radius:4px;background:#fff;color:var(--ink);font-weight:700}
+        .pos-quantity button:hover{background:#f3f6f1}
+        .pos-quantity span{min-width:16px;text-align:center;font-size:11px;font-weight:700}
+        .pos-checkout{display:grid;gap:11px;padding:14px 16px 16px;border-top:1px solid var(--line)}
+        .pos-totals{display:grid;gap:8px}
+        .pos-total-row{display:flex;justify-content:space-between;gap:12px;color:var(--muted);font-size:11px}
+        .pos-total-row strong{color:var(--ink)}
+        .pos-total-row.final{padding-top:9px;border-top:1px solid var(--line);color:var(--ink);font-size:13px;font-weight:800}
+        .pos-total-row.final strong{font-family:'Manrope',sans-serif;font-size:17px}
+        .pos-checkout .primary-button{width:100%;height:42px}
+        .pos-empty{padding:24px 10px;color:var(--muted);font-size:11px;text-align:center}
+        .pos-change{display:flex;justify-content:space-between;gap:10px;padding-top:7px;color:var(--muted);font-size:11px}
+        .pos-change strong{color:var(--green);font-size:13px}
+        .invoice-paper{display:grid;gap:14px;color:var(--ink)}
+        .invoice-heading{text-align:center}
+        .invoice-heading h3{margin:0;font-family:'Manrope',sans-serif;font-size:18px}
+        .invoice-heading p,.invoice-meta{margin:4px 0 0;color:var(--muted);font-size:11px}
+        .invoice-meta{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+        .invoice-table{white-space:normal}
+        .invoice-table th,.invoice-table td{padding:8px 6px;border-bottom:1px solid var(--line);font-size:11px}
+        .invoice-table th:last-child,.invoice-table td:last-child{text-align:right}
+        .invoice-totals{display:grid;gap:7px;margin-left:auto;width:min(100%,260px)}
+        .invoice-print{display:none}
+        .guide-content{padding:17px 20px 20px}
+        .guide-content h3{margin:0;font-family:'Manrope',sans-serif;font-size:15px}
+        .guide-content p{margin:6px 0 12px;color:var(--muted);font-size:11px;line-height:1.6}
+        .guide-content ol{display:grid;gap:9px;margin:0;padding-left:20px;color:var(--ink);font-size:11px;line-height:1.65}
+        .ideas-controls{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,220px) auto;align-items:end;gap:12px;padding:16px}
+        .ideas-summary{margin:0 16px 14px;color:var(--muted);font-size:11px;line-height:1.6}
+        .ideas-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+        .idea-card{display:grid;align-content:start;gap:12px;padding:15px;border:1px solid var(--line);border-radius:7px;background:#fff}
+        .idea-card-header{display:flex;justify-content:space-between;align-items:flex-start;gap:10px}
+        .idea-card h2{margin:0;font-family:'Manrope',sans-serif;font-size:15px}
+        .idea-card-intro{margin:4px 0 0;color:var(--muted);font-size:10px;line-height:1.5}
+        .idea-badge{flex:none;padding:5px 7px;border-radius:4px;background:var(--green-pale);color:var(--green);font-size:9px;font-weight:700}
+        .idea-badge.short{background:var(--orange-pale);color:#a7572f}
+        .idea-capital{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:1px;background:var(--line);border:1px solid var(--line)}
+        .idea-capital div{display:grid;gap:4px;min-width:0;padding:9px;background:#fff}
+        .idea-capital span,.idea-metrics span{color:var(--muted);font-size:9px;line-height:1.4}
+        .idea-capital strong{font-size:11px;overflow-wrap:anywhere}
+        .idea-metrics{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px 12px}
+        .idea-metrics div{display:grid;gap:4px;min-width:0}
+        .idea-metrics strong{font-family:'Manrope',sans-serif;font-size:13px;overflow-wrap:anywhere}
+        .idea-metrics .idea-profit{color:var(--green)}
+        .idea-assumptions{padding-top:9px;border-top:1px solid var(--line);color:var(--muted);font-size:9px;line-height:1.6}
+        .idea-plan-button{width:100%;justify-content:center}
+        .idea-plan-section{padding-top:10px;border-top:1px solid var(--line)}
+        .idea-plan-section h3{margin:0 0 7px;font-family:'Manrope',sans-serif;font-size:12px}
+        .idea-plan-section ul,.idea-plan-section ol{display:grid;gap:6px;margin:0;padding-left:18px;color:#49584d;font-size:10px;line-height:1.6}
+        .idea-plan-estimate{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:1px;background:var(--line);border:1px solid var(--line)}
+        .idea-plan-estimate div{display:grid;gap:5px;padding:10px;background:#fff}
+        .idea-plan-estimate span{color:var(--muted);font-size:9px}
+        .idea-plan-estimate strong{font-family:'Manrope',sans-serif;font-size:12px;overflow-wrap:anywhere}
+        .ideas-empty{padding:24px;color:var(--muted);font-size:11px;text-align:center}
+        @media(max-width:740px){.ideas-grid{grid-template-columns:1fr}.ideas-controls{grid-template-columns:1fr}.idea-capital{grid-template-columns:repeat(3,minmax(0,1fr))}}
+        @media print{body>*:not(#invoicePrintArea){display:none!important}#invoicePrintArea{display:block!important;position:static!important;padding:12mm;color:#111;background:#fff;font:12px 'DM Sans',sans-serif}.invoice-paper{max-width:420px;margin:0 auto}.invoice-table th,.invoice-table td{border-color:#ddd}.invoice-meta p{color:#444}}
+        @media(max-width:900px){.pos-layout{grid-template-columns:minmax(0,1fr)}.pos-cart-panel{position:static}}
+        @media(max-width:740px){.pos-product-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:7px;padding:10px}.pos-product{min-height:95px;padding:10px}.pos-cart-items{max-height:260px}}
+      </style>`);
+      document.querySelector('.nav').insertAdjacentHTML('afterbegin','<button class="nav-button" data-view="pos" aria-label="Kasir" title="Kasir"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M4 8h16l-1 13H5L4 8Z"/><path d="M9 9V6a3 3 0 0 1 6 0v3M9 13h6"/></svg><span>Kasir</span></button>');
+      document.querySelector('.page').insertAdjacentHTML('afterbegin',`<section class="view" id="view-pos" aria-label="Kasir penjualan">
+        <div class="page-heading"><div><p class="eyebrow">Penjualan cepat</p><h1>Kasir</h1><p class="heading-subtitle">Pilih beberapa produk, cek total, lalu simpan penjualan.</p></div><div class="heading-actions"><button class="secondary-button" id="posManualSale" type="button">Penjualan manual</button><button class="primary-button" id="posAddProduct" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>Tambah menu</button></div></div>
+        <div class="pos-layout"><section class="panel"><div class="panel-header"><div><h2 class="panel-title">Pilih produk</h2><div class="panel-hint">Produk tanpa stok tidak dapat ditambahkan.</div></div><input class="search" id="posSearch" type="search" placeholder="Cari produk..." aria-label="Cari produk kasir"></div><div class="pos-product-grid" id="posProducts"></div></section>
+        <section class="panel pos-cart-panel"><div class="panel-header"><div><h2 class="panel-title">Keranjang</h2><div class="panel-hint" id="posCartCount">0 barang</div></div><button class="row-action" id="posClear" type="button" title="Kosongkan keranjang" aria-label="Kosongkan keranjang">×</button></div><div class="pos-cart-items" id="posCartItems"></div>
+        <form class="pos-checkout" id="posCheckout"><div class="field"><label for="posCustomer">Nama pelanggan (opsional)</label><input id="posCustomer" maxlength="80" placeholder="Nama pelanggan"></div><div class="field"><label for="posDiscount">Diskon (opsional)</label><input id="posDiscount" type="number" min="0" step="1" inputmode="numeric" placeholder="0"></div><div class="field"><label for="posPayment">Pembayaran</label><select id="posPayment"><option value="paid">Lunas</option><option value="unpaid">Belum lunas · catat sebagai piutang</option></select></div><div class="field hidden" id="posDueDateField"><label for="posDueDate">Tanggal jatuh tempo</label><input id="posDueDate" type="date"></div><div class="pos-totals" aria-live="polite"><div class="pos-total-row"><span>Subtotal</span><strong id="posSubtotal">Rp0</strong></div><div class="pos-total-row"><span>Diskon</span><strong id="posDiscountTotal">Rp0</strong></div><div class="pos-total-row"><span>Laba kotor</span><strong id="posProfit">Rp0</strong></div><div class="pos-total-row final"><span>Total bayar</span><strong id="posTotal">Rp0</strong></div></div><button class="primary-button" type="submit">Simpan penjualan</button></form></section></div>
+      </section>`);
+      el('posPayment').innerHTML='<option value="cash">Tunai</option><option value="transfer">Transfer / QRIS</option><option value="unpaid">Belum lunas · catat sebagai piutang</option>';
+      el('posPayment').parentElement.insertAdjacentHTML('afterend','<div class="field" id="posCashReceivedField"><label for="posCashReceived">Uang diterima</label><input id="posCashReceived" type="number" min="0" step="1" inputmode="numeric" placeholder="0" required><div class="pos-change"><span>Uang kembali</span><strong id="posCashChange">Rp0</strong></div></div>');
+      document.body.insertAdjacentHTML('beforeend','<div class="modal-backdrop" id="invoiceModal" role="presentation"><section class="modal" role="dialog" aria-modal="true" aria-labelledby="invoiceModalTitle"><div class="modal-header"><div><h2 id="invoiceModalTitle">Invoice penjualan</h2><p>Rincian pembayaran pelanggan.</p></div><button class="modal-close" type="button" data-close="invoiceModal" aria-label="Tutup invoice">×</button></div><div class="modal-form" id="invoiceContent"></div><div class="modal-actions" style="padding:0 20px 20px"><button class="secondary-button" type="button" data-close="invoiceModal">Tutup</button><button class="primary-button" type="button" id="printInvoice">Cetak invoice</button></div></section></div><div class="invoice-print" id="invoicePrintArea" aria-hidden="true"></div>');
+      document.body.insertAdjacentHTML('beforeend','<div class="modal-backdrop" id="guideModal" role="presentation"><section class="modal" role="dialog" aria-modal="true" aria-labelledby="guideModalTitle" style="width:min(100%,560px)"><div class="modal-header"><div><h2 id="guideModalTitle">Panduan singkat</h2><p>Pilih fitur untuk melihat langkah penggunaan.</p></div><button class="modal-close" type="button" data-close="guideModal" aria-label="Tutup panduan">×</button></div><div class="modal-form"><div class="field"><label for="guideTopic">Topik panduan</label><select id="guideTopic"><option value="overview">Ringkasan</option><option value="pos">Kasir dan invoice</option><option value="transactions">Transaksi</option><option value="products">Produk dan stok</option><option value="debts">Utang dan piutang</option><option value="reports">Analitik dan produk terlaris</option><option value="simulator">Simulasi keuntungan</option><option value="data">Profil dan data</option><option value="export">Ekspor dan cetak</option></select></div></div><div class="guide-content" id="guideContent" role="status" aria-live="polite"></div><div class="modal-actions" style="padding:0 20px 20px"><button class="secondary-button" type="button" data-close="guideModal">Tutup</button></div></section></div>');
+      el('guideTopic').insertAdjacentHTML('beforeend','<option value="ideas">Ide usaha</option>');
+      document.body.insertAdjacentHTML('beforeend','<div class="modal-backdrop" id="businessPlanModal" role="presentation"><section class="modal" role="dialog" aria-modal="true" aria-labelledby="businessPlanTitle" style="width:min(100%,620px);max-height:calc(100vh - 32px)"><div class="modal-header"><div><h2 id="businessPlanTitle">Rencana usaha awal</h2><p>Persiapan dan langkah untuk model usaha terpilih.</p></div><button class="modal-close" type="button" data-close="businessPlanModal" aria-label="Tutup rencana usaha">×</button></div><div class="modal-form" id="businessPlanContent" aria-live="polite"></div><div class="modal-actions" style="padding:0 20px 20px"><button class="secondary-button" type="button" data-close="businessPlanModal">Tutup</button></div></section></div>');
+      el('reportBody').closest('.report-grid').insertAdjacentHTML('afterend','<section class="panel table-panel" id="productProfitPanel"><div class="panel-header"><div><h2 class="panel-title">Produk paling menguntungkan</h2><div class="panel-hint">Diurutkan berdasarkan laba kotor · 12 bulan terakhir</div></div></div><div class="table-scroll"><table><thead><tr><th>#</th><th>Produk</th><th>Unit terjual</th><th>Omzet bersih</th><th>HPP</th><th>Laba kotor</th><th>Margin</th></tr></thead><tbody id="productProfitBody"></tbody></table></div><div class="table-footer" id="productProfitFooter"></div></section>');
+      document.querySelector('.nav').insertAdjacentHTML('beforeend','<button class="nav-button" data-view="ideas" aria-label="Ide usaha" title="Ide usaha"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M9 18h6m-5 4h4M8.2 14.5A7 7 0 1 1 15.8 14.5c-.9.7-1.3 1.4-1.5 2.5h-4.6c-.2-1.1-.6-1.8-1.5-2.5Z"/><path d="M12 4v2m5.7.3-1.4 1.4M19 12h-2M6.3 7.7l1.4 1.4M7 12H5" stroke-linecap="round"/></svg><span>Ide usaha</span></button>');
+      el('view-simulator').insertAdjacentHTML('afterend',`<section class="view" id="view-ideas" aria-label="Saran usaha berdasarkan modal">
+        <div class="page-heading"><div><p class="eyebrow">Perencanaan usaha</p><h1>Ide usaha</h1><p class="heading-subtitle">Bandingkan kebutuhan modal dan potensi hasil dari beberapa model usaha.</p></div></div>
+        <section class="panel"><div class="panel-header"><div><h2 class="panel-title">Berapa modal yang tersedia?</h2><div class="panel-hint">Masukkan dana yang siap digunakan untuk memulai.</div></div></div><div class="ideas-controls"><div class="field"><label for="ideaBudget">Modal tersedia</label><input id="ideaBudget" type="text" inputmode="numeric" placeholder="Contoh: 10.000.000" aria-describedby="ideasDisclaimer"></div><button class="primary-button" id="findBusinessIdeas" type="button">Lihat rekomendasi</button></div><p class="ideas-summary" id="ideasSummary" aria-live="polite">Masukkan modal untuk melihat usaha yang sesuai.</p></section>
+        <div class="ideas-grid" id="businessIdeasGrid" style="margin-top:14px"></div>
+        <p class="panel-hint" id="ideasDisclaimer" style="margin-top:12px;line-height:1.6">Semua angka adalah simulasi contoh dalam rupiah, bukan janji keuntungan. Hasil nyata bergantung pada lokasi, harga pemasok, jumlah pelanggan, dan biaya operasional.</p>
+      </section>`);
+      el('findBusinessIdeas').insertAdjacentHTML('beforebegin','<div class="field"><label for="ideaCategory">Jenis usaha</label><select id="ideaCategory"><option value="">Semua jenis usaha</option><option>Makanan</option><option>Minuman</option><option>Reseller</option><option>Ritel</option><option>Jasa</option><option>Budidaya</option><option>Kreatif</option></select></div>');
+      const currencyInputIds=['simulatorPrice','simulatorCapital','productPrice','productCost','restockCost','paymentAmount','entryAmount','entryCogs','posDiscount','posCashReceived','ideaBudget'];
       function formatCurrencyInput(input){
         const value=input.value;
         const cursor=input.selectionStart??value.length;
@@ -335,13 +433,14 @@
               const valid=importPlan.filter(row=>!row.error);if(!valid.length)return;
               if(el('importKind').value==='products'){
                 for(const row of valid){const imported=row.value;const existing=products.find(product=>normalizeImportText(product.name)===normalizeImportText(imported.name));if(existing){existing.price=imported.price;existing.cost=imported.cost;existing.stock=imported.stock;}else products.push(imported);}
-                saveProducts();renderProducts();populateSaleProducts();el('importModal').classList.remove('open');showToast(`${valid.length} produk berhasil diimpor.`);return;
+                saveProducts();renderProducts();renderPos();populateSaleProducts();el('importModal').classList.remove('open');showToast(`${valid.length} produk berhasil diimpor.`);return;
               }
               if(isDemoData&&!prepareForRealEntry())return;
               const imported=valid.map(row=>row.value);transactions.push(...imported);isDemoData=false;save();
               const latest=imported.reduce((date,item)=>item.date>date?item.date:date,selectedPeriod+'-01');selectedPeriod=latest.slice(0,7);periodInput.value=selectedPeriod;render();el('importModal').classList.remove('open');showToast(`${imported.length} transaksi berhasil diimpor.`);
             }
       el('exportButton').insertAdjacentHTML('afterend','<button class="secondary-button" id="workspaceButton" type="button" title="Profil usaha dan cadangan data"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M12 3v12m-5-5 5 5 5-5M4 17v3h16v-3"/></svg><span>Data &amp; profil</span></button>');
+      el('workspaceButton').insertAdjacentHTML('afterend','<button class="secondary-button" id="guideButton" type="button" title="Panduan penggunaan" aria-label="Panduan penggunaan"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9.6 9a2.5 2.5 0 1 1 4.2 1.8c-1 .8-1.8 1.2-1.8 2.7M12 17h.01" stroke-linecap="round"/></svg><span>Panduan</span></button>');
       el('restoreChoose').parentElement.insertAdjacentHTML('afterend','<div style="margin-top:14px;padding-top:13px;border-top:1px solid var(--line)"><button class="secondary-button" id="clearRecords" type="button" style="color:#b1473f;border-color:#e8cbc6">Hapus semua catatan transaksi</button><p class="panel-hint" style="margin-top:8px">Menghapus transaksi dan riwayat utang-piutang. Produk, stok sekarang, dan profil usaha tetap tersimpan. Unduh cadangan terlebih dahulu jika diperlukan.</p></div>');
       el('entryDate').parentElement.parentElement.insertAdjacentHTML('afterend','<div class="form-grid hidden" id="productSaleFields"><div class="field"><label for="entryProduct">Produk</label><select id="entryProduct"><option value="">Penjualan tanpa produk</option></select></div><div class="field hidden" id="entryQuantityField"><label for="entryQuantity">Jumlah barang terjual</label><input id="entryQuantity" type="number" min="1" step="1" inputmode="numeric" value="1"></div></div>');
       el('entryDate').parentElement.parentElement.nextElementSibling.insertAdjacentHTML('afterend','<div class="form-grid hidden" id="paymentStatusFields"><div class="field"><label for="entryPaid">Status pembayaran</label><select id="entryPaid"><option value="paid">Lunas</option><option value="unpaid">Belum lunas</option></select></div><div class="field hidden" id="dueDateField"><label for="entryDueDate">Tanggal jatuh tempo</label><input id="entryDueDate" type="date"></div></div>');
@@ -351,7 +450,7 @@
       const getSummary = list => {
         const summary = {revenue:0,cashRevenue:0,receivables:0,cogs:0,cashCogs:0,expenses:0,cashExpenses:0,payables:0,stockPurchases:0,fixed:0,variable:0,capital:0,withdrawal:0};
         for(const item of list){
-          if(item.type==='sale'){const amount=Number(item.amount)||0;const paid=getPaidAmount(item);summary.revenue+=amount;summary.cashRevenue+=paid;summary.receivables+=amount-paid;summary.cogs+=Number(item.cogs)||0;if(!item.productId)summary.cashCogs+=Number(item.cogs)||0;}
+          if(item.type==='sale'){const amount=Number(item.amount)||0;const paid=getPaidAmount(item);summary.revenue+=amount;summary.cashRevenue+=paid;summary.receivables+=amount-paid;summary.cogs+=Number(item.cogs)||0;if(!item.productId&&!Array.isArray(item.items))summary.cashCogs+=Number(item.cogs)||0;}
           if(item.type==='expense'){const amount=Number(item.amount)||0;const paid=getPaidAmount(item);summary.expenses+=amount;summary.cashExpenses+=paid;summary.payables+=amount-paid;if(item.nature==='fixed')summary.fixed+=amount;else summary.variable+=amount;}
           if(item.type==='stockPurchase'){const amount=Number(item.amount)||0;const paid=getPaidAmount(item);summary.stockPurchases+=paid;summary.payables+=amount-paid;}
           if(item.type==='capital')summary.capital+=Number(item.amount)||0;
@@ -363,6 +462,29 @@
       };
       function getPaidAmount(item){const amount=Number(item.amount)||0;return Math.max(0,Math.min(amount,item.paidAmount===undefined?(item.paid===false?0:amount):Number(item.paidAmount)||0));}
       const dateLabel = value => {if(!value)return '—';const [year,month,day]=value.split('-').map(Number);return new Intl.DateTimeFormat('id-ID',{day:'numeric',month:'short',year:'numeric'}).format(new Date(year,month-1,day));};
+      const guideTopics={
+        overview:{title:'Ringkasan',intro:'Gunakan halaman ini untuk melihat kondisi usaha pada periode yang dipilih.',steps:['Pilih bulan dari kalender di bagian atas.','Baca omzet, laba bersih, saldo kas, dan HPP pada ringkasan.','Lihat analisis titik impas dan transaksi terbaru di bawahnya.','Jika masih tertulis Data simulasi, Hapus & mulai baru menghapus catatan contoh sebelum mulai mencatat data usaha.']},
+        pos:{title:'Kasir dan invoice',intro:'Catat satu pesanan yang berisi beberapa menu sekaligus.',steps:['Belum punya menu? Pilih Tambah menu, lalu isi nama, harga jual, modal per unit, dan stok awal.','Cari menu, pilih satu atau beberapa item, lalu atur jumlahnya di keranjang.','Masukkan diskon bila ada. Pilih Tunai, Transfer / QRIS, atau Belum lunas.','Untuk tunai, masukkan uang diterima. Untuk piutang, isi tanggal jatuh tempo.','Pilih Simpan penjualan. Invoice muncul dan bisa dicetak; buka lagi dari tombol Invoice di riwayat transaksi.']},
+        transactions:{title:'Transaksi',intro:'Gunakan pencatatan transaksi untuk penjualan atau pergerakan uang di luar keranjang kasir.',steps:['Pilih Tambah transaksi, lalu tentukan jenis transaksi dan tanggal.','Saat menjual menu, pilih produk agar harga, HPP, dan stok terisi otomatis. Penjualan tanpa produk dapat dicatat manual.','Untuk beban, pilih kategori serta jenis tetap atau variabel.','Gunakan pencarian dan kalender untuk menemukan transaksi. Penjualan yang memiliki pembayaran terkait tidak bisa dihapus sebelum pembayaran terkait diselesaikan.']},
+        products:{title:'Produk dan stok',intro:'Katalog produk dipakai bersama oleh Kasir dan pencatatan penjualan.',steps:['Pilih Tambah produk untuk mengisi nama, harga jual, modal per unit, dan stok awal.','Gunakan Ubah untuk memperbarui nama atau harga. Stok masuk dicatat lewat Stok +.','Saat menambah stok, masukkan jumlah serta modal per unit baru; aplikasi memperbarui rata-rata modal.','Stok berkurang ketika produk terjual melalui Kasir atau transaksi yang menautkan produk.']},
+        debts:{title:'Utang dan piutang',intro:'Pantau tagihan yang belum lunas dari pelanggan atau ke pemasok.',steps:['Pilih Belum lunas saat checkout Kasir untuk membuat piutang; isi tanggal jatuh tempo.','Gunakan Catat piutang atau Catat utang untuk tagihan yang dicatat di luar Kasir.','Pilih Bayar pada baris tagihan untuk mencatat pembayaran sebagian atau seluruhnya.','Status dan sisa tagihan diperbarui setelah pembayaran dicatat.']},
+        reports:{title:'Analitik dan produk terbaik',intro:'Laporan mengikuti periode pada kalender dan menampilkan ringkasan sampai 12 bulan.',steps:['Pilih bulan akhir periode di kalender bagian atas.','Gunakan Ringkasan bulanan untuk membandingkan omzet, HPP, beban, dan laba bersih.','Produk paling menguntungkan diurutkan menurut laba kotor setelah diskon dan HPP. Hanya penjualan yang tertaut ke produk dapat dirinci per menu.','Pilih Cetak laporan untuk membuka tampilan cetak.']},
+        ideas:{title:'Ide usaha',intro:'Bandingkan model usaha contoh dengan jumlah modal yang tersedia.',steps:['Masukkan modal yang siap digunakan.','Pilih rekomendasi yang bertanda Sesuai modal; jika belum ada yang cocok, lihat opsi terdekat dan tambahan dana yang dibutuhkan.','Bandingkan modal awal, omzet, biaya rutin, serta estimasi laba bulanan dan 12 bulan.','Sesuaikan asumsi harga, jumlah pelanggan, dan biaya dengan kondisi lokasi. Angka tahunan menganggap penjualan dan biaya tetap stabil.']},
+        simulator:{title:'Simulasi keuntungan',intro:'Coba perkiraan sebelum membuat keputusan harga atau jumlah produksi.',steps:['Masukkan harga jual per barang dan jumlah yang direncanakan.','Masukkan total modal untuk seluruh barang tersebut.','Baca omzet, perkiraan laba, margin, dan imbal hasil modal.','Simulasi tidak mengubah stok atau menyimpan transaksi; hasil belum dikurangi biaya operasional dan pajak.']},
+        ideas:{title:'Ide usaha',intro:'Jelajahi lebih banyak model usaha berdasarkan modal dan jenis yang diminati.',steps:['Masukkan dana yang siap digunakan, lalu pilih kategori atau Semua jenis usaha.','Semua ide yang sesuai modal akan ditampilkan dan diurutkan menurut estimasi laba bulanan. Jika belum ada yang cocok, lihat opsi terdekat dan kekurangan modalnya.','Pilih Lihat rencana awal untuk memeriksa kebutuhan, langkah mulai, rutinitas, promosi, dan risiko.','Laba bulanan dan tahunan adalah simulasi dari asumsi contoh, bukan jaminan hasil. Sesuaikan dengan kondisi lokasi dan pemasok.']},
+        data:{title:'Profil dan data',intro:'Profil dan alat pencadangan ada di tombol Data & profil pada bar bagian atas.',steps:['Isi nama usaha, pemilik, dan alamat untuk dicantumkan pada laporan dan invoice.','Pilih Unduh cadangan lengkap secara berkala untuk menyimpan transaksi, produk, dan profil.','Untuk memindahkan data, pilih Pulihkan cadangan lalu pilih file JSON cadangan.','Impor Excel / CSV menerima template produk atau transaksi. Hapus semua catatan hanya menghapus transaksi.','Reset seluruh data usaha menghapus transaksi, menu/stok, dan profil agar usaha baru bisa diisi dari awal. Tindakan ini tidak dapat dibatalkan.']},
+        export:{title:'Ekspor dan cetak',intro:'Ekspor transaksi dan cetak laporan/invoice tersedia di bagian yang sesuai.',steps:['Tombol Ekspor di bar atas mengunduh transaksi untuk bulan yang dipilih sebagai CSV.','Di Analitik & laporan, pilih Cetak laporan untuk mencetak ringkasan usaha.','Invoice dapat dicetak setelah checkout atau dibuka lagi dari riwayat transaksi.','Cadangan lengkap berbeda dari CSV: cadangan juga menyimpan produk, stok, dan profil.']}
+      };
+      const guideViewTopics={overview:'overview',pos:'pos',transactions:'transactions',debts:'debts',products:'products',reports:'reports',simulator:'simulator',ideas:'ideas'};
+      function renderGuide(){
+        const guide=guideTopics[el('guideTopic').value]||guideTopics.overview;
+        el('guideContent').innerHTML=`<h3>${escapeHtml(guide.title)}</h3><p>${escapeHtml(guide.intro)}</p><ol>${guide.steps.map(step=>`<li>${escapeHtml(step)}</li>`).join('')}</ol>`;
+      }
+      function openGuide(){
+        const view=document.querySelector('.view.active')?.id.replace('view-','')||'overview';
+        el('guideTopic').value=guideViewTopics[view]||'overview';
+        renderGuide();el('guideModal').classList.add('open');el('guideTopic').focus();
+      }
       function showToast(message){const toast=el('toast');toast.textContent=message;toast.classList.add('visible');clearTimeout(toastTimer);toastTimer=setTimeout(()=>toast.classList.remove('visible'),2700);}
       function prepareForRealEntry(){
         if(!isDemoData)return true;
@@ -387,7 +509,8 @@
         const outstanding=(item.type==='sale'||item.type==='expense')&&getPaidAmount(item)<Number(item.amount);
         const canDelete=item.type!=='stockPurchase';
         const saleProfit=item.type==='sale'?Number(item.amount)-(Number(item.cogs)||0):0;
-        return `<tr><td class="date-cell">${escapeHtml(dateLabel(item.date))}</td><td class="description-cell">${escapeHtml(item.description)}</td><td class="category-cell">${escapeHtml(item.category||'Lainnya')}${item.type==='sale'&&Number(item.cogs)>0?` <span style="color:#929a93">· HPP ${escapeHtml(formatCompact(item.cogs))}</span>`:''}${item.type==='sale'?` <span style="color:${saleProfit<0?'var(--red)':'var(--green)'}">· Laba ${escapeHtml(formatCompact(saleProfit))}</span>`:''}${item.type==='expense'?` <span style="color:#929a93">· ${item.nature==='fixed'?'Tetap':'Variabel'}</span>`:''}${outstanding?' <span class="type-tag expense">Belum lunas</span>':''}</td><td><span class="type-tag ${typeClass}">${typeLabels[item.type]||'Lainnya'}</span></td><td class="${incoming?'amount-positive':'amount-negative'}">${incoming?'+':'−'}${escapeHtml(formatCurrency(amountDisplay))}</td><td>${canDelete?`<button class="row-action" data-delete="${escapeHtml(item.id)}" title="Hapus transaksi" aria-label="Hapus ${escapeHtml(item.description)}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M3 6h18M8 6V4h8v2m3 0-1 14H6L5 6m4 4v6m6-6v6"/></svg></button>`:''}</td></tr>`;
+        const itemDetails=Array.isArray(item.items)?`<div style="margin-top:3px;color:var(--muted);font-size:10px;font-weight:400;white-space:normal">${item.items.map(line=>`${escapeHtml(line.name)} × ${line.quantity}`).join(' · ')}</div><button class="secondary-button" type="button" data-invoice="${escapeHtml(item.id)}" style="height:25px;margin-top:5px;padding:0 7px;font-size:9px">Invoice ${escapeHtml(item.invoiceNumber||'')}</button>`:'';
+        return `<tr><td class="date-cell">${escapeHtml(dateLabel(item.date))}</td><td class="description-cell">${escapeHtml(item.description)}${itemDetails}</td><td class="category-cell">${escapeHtml(item.category||'Lainnya')}${item.type==='sale'&&Number(item.cogs)>0?` <span style="color:#929a93">· HPP ${escapeHtml(formatCompact(item.cogs))}</span>`:''}${item.type==='sale'?` <span style="color:${saleProfit<0?'var(--red)':'var(--green)'}">· Laba ${escapeHtml(formatCompact(saleProfit))}</span>`:''}${item.type==='expense'?` <span style="color:#929a93">· ${item.nature==='fixed'?'Tetap':'Variabel'}</span>`:''}${outstanding?' <span class="type-tag expense">Belum lunas</span>':''}</td><td><span class="type-tag ${typeClass}">${typeLabels[item.type]||'Lainnya'}</span></td><td class="${incoming?'amount-positive':'amount-negative'}">${incoming?'+':'−'}${escapeHtml(formatCurrency(amountDisplay))}</td><td>${canDelete?`<button class="row-action" data-delete="${escapeHtml(item.id)}" title="Hapus transaksi" aria-label="Hapus ${escapeHtml(item.description)}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M3 6h18M8 6V4h8v2m3 0-1 14H6L5 6m4 4v6m6-6v6"/></svg></button>`:''}</td></tr>`;
       }
       function renderTables(){
         const list=filteredByPeriod(selectedPeriod);
@@ -395,7 +518,7 @@
         el('recentBody').innerHTML=recent.length?recent.map(rowMarkup).join(''):'<tr><td colspan="6" class="empty-state">Belum ada transaksi pada periode ini. Catat transaksi pertama untuk memulai.</td></tr>';
         el('recentFooter').textContent=`${list.length} transaksi · ${list.length?`Periode ${monthNames[Number(selectedPeriod.slice(5,7))-1]} ${selectedPeriod.slice(0,4)}`:'Belum ada catatan'}`;
         const query=el('transactionSearch').value.trim().toLocaleLowerCase('id');
-        const matches=list.filter(item=>[item.description,item.category,typeLabels[item.type]].join(' ').toLocaleLowerCase('id').includes(query));
+        const matches=list.filter(item=>[item.description,item.category,typeLabels[item.type],...(item.items||[]).map(line=>line.name)].join(' ').toLocaleLowerCase('id').includes(query));
         el('transactionBody').innerHTML=matches.length?matches.map(rowMarkup).join(''):'<tr><td colspan="6" class="empty-state">Tidak ada transaksi yang cocok pada periode ini.</td></tr>';
         el('transactionFooter').textContent=`Menampilkan ${matches.length} dari ${list.length} transaksi${query?' yang cocok dengan pencarian':''}.`;
         el('transactionPeriodHint').textContent=`Periode ${monthNames[Number(selectedPeriod.slice(5,7))-1]} ${selectedPeriod.slice(0,4)} · gunakan kalender untuk mengganti.`;
@@ -411,6 +534,61 @@
         if(select)select.innerHTML='<option value="">Penjualan tanpa produk</option>'+products.map(product=>`<option value="${escapeHtml(product.id)}">${escapeHtml(product.name)} · stok ${Number(product.stock).toLocaleString('id-ID')}</option>`).join('');
         const restockSelect=el('restockProduct');
         if(restockSelect)restockSelect.innerHTML=products.map(product=>`<option value="${escapeHtml(product.id)}">${escapeHtml(product.name)} · stok ${Number(product.stock).toLocaleString('id-ID')}</option>`).join('');
+      }
+      function renderPos(){
+        const query=el('posSearch').value.trim().toLocaleLowerCase('id');
+        const visibleProducts=products.filter(product=>product.name.toLocaleLowerCase('id').includes(query));
+        el('posProducts').innerHTML=visibleProducts.length?visibleProducts.map(product=>`<button class="pos-product" type="button" data-pos-add="${escapeHtml(product.id)}" ${Number(product.stock)<=0?'disabled':''}><strong>${escapeHtml(product.name)}</strong><span>${formatCurrency(product.price)}</span><span>${Number(product.stock)>0?`Stok ${Number(product.stock).toLocaleString('id-ID')} unit`:'Stok habis'}</span></button>`).join(''):'<div class="empty-state" style="grid-column:1/-1">Produk tidak ditemukan.</div>';
+        const cartRows=posCart.map(line=>({line,product:products.find(product=>String(product.id)===String(line.productId))})).filter(entry=>entry.product);
+        const totalQuantity=cartRows.reduce((total,entry)=>total+entry.line.quantity,0);
+        el('posCartCount').textContent=`${totalQuantity.toLocaleString('id-ID')} barang · ${cartRows.length} produk`;
+        el('posCartItems').innerHTML=cartRows.length?cartRows.map(({line,product})=>`<div class="pos-cart-item"><div><div class="pos-item-name">${escapeHtml(product.name)}</div><div class="pos-item-subtotal">${formatCurrency(product.price)} × ${line.quantity} · ${formatCurrency(product.price*line.quantity)}</div></div><div class="pos-quantity"><button type="button" data-pos-dec="${escapeHtml(product.id)}" aria-label="Kurangi ${escapeHtml(product.name)}">−</button><span>${line.quantity}</span><button type="button" data-pos-inc="${escapeHtml(product.id)}" aria-label="Tambah ${escapeHtml(product.name)}">+</button><button type="button" data-pos-remove="${escapeHtml(product.id)}" aria-label="Hapus ${escapeHtml(product.name)}">×</button></div></div>`).join(''):'<div class="pos-empty">Keranjang masih kosong. Pilih produk untuk mulai.</div>';
+        renderPosTotals();
+      }
+      function updatePosPaymentFields(){
+        const paymentMethod=el('posPayment').value;
+        const isCash=paymentMethod==='cash';
+        const isUnpaid=paymentMethod==='unpaid';
+        el('posCashReceivedField').classList.toggle('hidden',!isCash);
+        el('posCashReceived').required=isCash;
+        el('posDueDateField').classList.toggle('hidden',!isUnpaid);
+        el('posDueDate').required=isUnpaid;
+        renderPosTotals();
+      }
+      function showInvoice(item){
+        const methodLabels={cash:'Tunai',transfer:'Transfer / QRIS',receivable:'Belum lunas · piutang'};
+        const itemRows=(item.items||[]).map(line=>`<tr><td>${escapeHtml(line.name)} × ${line.quantity}<div style="margin-top:3px;color:var(--muted);font-size:10px">@ ${formatCurrency(line.unitPrice)}</div></td><td>${formatCurrency(line.unitPrice*line.quantity)}</td></tr>`).join('');
+        const isCash=item.paymentMethod==='cash';
+        const status=getPaidAmount(item)<Number(item.amount)?'Belum lunas':'Lunas';
+        const markup=`<div class="invoice-paper"><div class="invoice-heading"><h3>${escapeHtml(profile.businessName||'RuangUsaha')}</h3><p>INVOICE PENJUALAN</p></div><div class="invoice-meta"><span>No. invoice</span><strong>${escapeHtml(item.invoiceNumber||'—')}</strong><span>Tanggal</span><strong>${escapeHtml(dateLabel(item.date))}</strong><span>Pelanggan</span><strong>${escapeHtml(item.customer||'Umum')}</strong><span>Status</span><strong>${status}</strong></div><table class="invoice-table"><thead><tr><th>Barang / jumlah</th><th>Total</th></tr></thead><tbody>${itemRows}</tbody></table><div class="invoice-totals"><div class="pos-total-row"><span>Subtotal</span><strong>${formatCurrency(item.subtotal??item.amount)}</strong></div>${Number(item.discount)>0?`<div class="pos-total-row"><span>Diskon</span><strong>−${formatCurrency(item.discount)}</strong></div>`:''}<div class="pos-total-row final"><span>Total</span><strong>${formatCurrency(item.amount)}</strong></div></div><div class="invoice-meta"><span>Metode pembayaran</span><strong>${methodLabels[item.paymentMethod]||'Tunai'}</strong>${isCash?`<span>Uang diterima</span><strong>${formatCurrency(item.cashReceived||0)}</strong><span>Uang kembali</span><strong>${formatCurrency(item.change||0)}</strong>`:''}</div><p style="margin:0;text-align:center;color:var(--muted);font-size:10px">Terima kasih telah berbelanja.</p></div>`;
+        el('invoiceContent').innerHTML=markup;
+        el('invoicePrintArea').innerHTML=markup;
+        el('invoiceModal').classList.add('open');
+      }
+      function renderPosTotals(){
+        const rows=posCart.map(line=>({line,product:products.find(product=>String(product.id)===String(line.productId))})).filter(entry=>entry.product);
+        const subtotal=rows.reduce((total,{line,product})=>total+product.price*line.quantity,0);
+        const cogs=rows.reduce((total,{line,product})=>total+product.cost*line.quantity,0);
+        const discount=readCurrencyInput(el('posDiscount'));
+        el('posSubtotal').textContent=formatCurrency(subtotal);
+        el('posDiscountTotal').textContent=formatCurrency(discount);
+        el('posProfit').textContent=formatCurrency(subtotal-discount-cogs);
+        el('posProfit').classList.toggle('amount-negative',subtotal-discount-cogs<0);
+        el('posTotal').textContent=formatCurrency(Math.max(0,subtotal-discount));
+        const cashChange=el('posPayment').value==='cash'?Math.max(0,readCurrencyInput(el('posCashReceived'))-Math.max(0,subtotal-discount)):0;
+        el('posCashChange').textContent=formatCurrency(cashChange);
+        el('posCheckout').querySelector('[type="submit"]').disabled=!rows.length;
+      }
+      function changePosQuantity(productId,delta){
+        const product=products.find(item=>String(item.id)===String(productId));
+        if(!product)return;
+        const line=posCart.find(item=>String(item.productId)===String(productId));
+        const nextQuantity=(line?.quantity||0)+delta;
+        if(nextQuantity>product.stock){showToast(`Stok ${product.name} hanya ${product.stock} unit.`);return;}
+        if(nextQuantity<=0)posCart=posCart.filter(item=>String(item.productId)!==String(productId));
+        else if(line)line.quantity=nextQuantity;
+        else posCart.push({productId:product.id,quantity:nextQuantity});
+        renderPos();
       }
       function renderDebts(){
         const receivables=transactions.filter(item=>item.type==='sale'&&getPaidAmount(item)<Number(item.amount));
@@ -460,8 +638,125 @@
         el('yearRevenue').textContent=formatCurrency(total.revenue);el('yearProfit').textContent=formatCurrency(total.profit);el('yearProfit').classList.toggle('negative',total.profit<0);el('yearExpenses').textContent=formatCurrency(total.cogs+total.expenses);el('yearAverage').textContent=formatCurrency(total.revenue/12);
         el('reportBusinessMeta').textContent=[profile.businessName,profile.owner?`Pemilik: ${profile.owner}`:'',profile.address].filter(Boolean).join(' · ')||'Profil usaha belum dilengkapi';
         el('reportBody').innerHTML=summaries.slice().reverse().map(item=>`<tr><td class="description-cell">${monthNames[item.date.getMonth()]} ${item.date.getFullYear()}</td><td>${formatCurrency(item.revenue)}</td><td>${formatCurrency(item.cogs)}</td><td>${formatCurrency(item.expenses)}</td><td class="${item.profit<0?'amount-negative':'amount-positive'}">${formatCurrency(item.profit)}</td><td>${item.revenue?`${item.margin.toFixed(1).replace('.',',')}%`:'—'}</td></tr>`).join('');
+        const reportPeriods=new Set(months.map(monthKey));
+        renderProductProfitability(transactions.filter(item=>item.type==='sale'&&reportPeriods.has(item.date?.slice(0,7))));
       }
-      function render(){renderOverview();renderReports();renderProducts();renderDebts();}
+      function renderProductProfitability(sales){
+        const totals=new Map();
+        const addLine=(productId,name,quantity,revenue,cogs)=>{
+          if(!productId||!Number.isSafeInteger(quantity)||quantity<=0||!Number.isSafeInteger(revenue)||!Number.isSafeInteger(cogs))return;
+          const key=String(productId);let summary=totals.get(key);
+          if(!summary){summary={name,quantity:0,revenue:0,cogs:0};totals.set(key,summary);}
+          summary.quantity+=quantity;summary.revenue+=revenue;summary.cogs+=cogs;
+        };
+        for(const sale of sales){
+          if(Array.isArray(sale.items)&&sale.items.length){
+            const lines=sale.items.map(line=>({
+              productId:line.productId,
+              name:String(line.name||''),
+              quantity:Number(line.quantity),
+              gross:Number(line.unitPrice)*Number(line.quantity),
+              cogs:Number(line.unitCost)*Number(line.quantity)
+            }));
+            const subtotal=lines.reduce((sum,line)=>sum+line.gross,0);
+            const discount=Number(sale.discount)||0;
+            if(!Number.isSafeInteger(subtotal)||subtotal<=0||!Number.isSafeInteger(discount)||discount<0||discount>subtotal||lines.some(line=>!Number.isSafeInteger(line.gross)||!Number.isSafeInteger(line.cogs)))continue;
+            const allocations=lines.map((line,index)=>{
+              const numerator=BigInt(discount)*BigInt(line.gross);
+              return{index,amount:Number(numerator/BigInt(subtotal)),remainder:numerator%BigInt(subtotal)};
+            });
+            const allocated=allocations.reduce((sum,line)=>sum+line.amount,0);
+            const remaining=discount-allocated;
+            allocations.slice().sort((left,right)=>left.remainder===right.remainder?left.index-right.index:left.remainder>right.remainder?-1:1).slice(0,remaining).forEach(line=>{allocations[line.index].amount++;});
+            lines.forEach((line,index)=>addLine(line.productId,line.name,line.quantity,line.gross-allocations[index].amount,line.cogs));
+          }else if(sale.productId&&Number.isSafeInteger(Number(sale.quantity))&&Number(sale.quantity)>0){
+            const product=products.find(entry=>String(entry.id)===String(sale.productId));
+            const quantity=Number(sale.quantity);const revenue=Number(sale.amount);
+            const cogs=sale.cogs===undefined?Number(product?.cost||0)*quantity:Number(sale.cogs);
+            addLine(sale.productId,sale.description||product?.name||'Produk',quantity,revenue,cogs);
+          }
+        }
+        const ranked=[...totals.values()].map(item=>({...item,profit:item.revenue-item.cogs,margin:item.revenue?(item.revenue-item.cogs)/item.revenue*100:0})).sort((left,right)=>right.profit-left.profit||right.revenue-left.revenue);
+        el('productProfitBody').innerHTML=ranked.length?ranked.slice(0,5).map((item,index)=>`<tr><td>${index+1}</td><td class="description-cell">${escapeHtml(item.name)}</td><td>${item.quantity.toLocaleString('id-ID')} unit</td><td>${formatCurrency(item.revenue)}</td><td>${formatCurrency(item.cogs)}</td><td class="${item.profit<0?'amount-negative':'amount-positive'}">${formatCurrency(item.profit)}</td><td>${item.margin.toFixed(1).replace('.',',')}%</td></tr>`).join(''):'<tr><td colspan="7" class="empty-state">Belum ada penjualan yang terhubung ke produk pada periode ini.</td></tr>';
+        el('productProfitFooter').textContent=ranked.length?`Menampilkan ${Math.min(ranked.length,5)} dari ${ranked.length} produk · laba kotor setelah diskon dan HPP.`:'Tambahkan penjualan melalui Kasir atau pilih produk saat mencatat transaksi.';
+      }
+      const businessIdeaModels=[
+        {name:'Camilan kemasan rumahan',category:'Makanan',description:'Produksi camilan sederhana untuk dijual langsung atau dititipkan.',equipment:1800000,initialStock:1200000,averagePrice:12000,unitsPerDay:30,activeDays:26,cogsRatio:.38,monthlyFixed:2200000,setupItems:['Kompor dan alat masak dasar','Timbangan digital dan sealer kemasan','Kemasan berlabel serta bahan baku awal'],launchSteps:['Pilih 1–2 resep yang bisa dibuat konsisten dan hitung biaya per porsi.','Uji rasa, ukuran, masa simpan, dan harga dengan calon pembeli.','Cek aturan kebersihan pangan serta izin yang berlaku di daerah sebelum menitipkan produk.'],dailyTasks:['Produksi sesuai pesanan dan cek kebersihan area kerja.','Catat jumlah produksi, stok, dan produk yang kedaluwarsa.','Pisahkan uang belanja bahan dari uang pribadi.'],marketing:['Tawarkan paket tester ke tetangga, kantor, atau warung sekitar.','Gunakan foto produk, daftar harga, dan pemesanan WhatsApp.'],watchouts:['Masa simpan pendek dapat menyebabkan stok terbuang.','Hitung biaya kemasan, gas, dan ongkos titip dalam harga jual.']},
+        {name:'Minuman dingin sederhana',category:'Minuman',description:'Minuman racikan dengan pilihan menu ringkas dan penjualan harian.',equipment:3500000,initialStock:1500000,averagePrice:18000,unitsPerDay:35,activeDays:26,cogsRatio:.32,monthlyFixed:2800000,setupItems:['Blender atau shaker dan alat ukur takaran','Cooler atau lemari pendingin kecil','Cup, tutup, sedotan, es, dan bahan minuman awal'],launchSteps:['Buat menu ringkas dan tetapkan resep serta takaran baku.','Bandingkan pemasok bahan dan hitung HPP termasuk cup, es, dan topping.','Tes penjualan di jam ramai sebelum menyewa lokasi tetap.'],dailyTasks:['Siapkan bahan secukupnya dan jaga suhu penyimpanan.','Periksa rasa, kebersihan alat, dan sisa bahan setiap hari.','Catat minuman terjual dan bahan yang perlu dibeli ulang.'],marketing:['Buat paket bundel atau promo jam sepi dengan margin yang dihitung.','Pasang menu dan lokasi di media sosial serta layanan pesan antar lokal.'],watchouts:['Bahan segar cepat rusak jika penjualan meleset dari perkiraan.','Pastikan biaya sewa, listrik, es, dan layanan antar masuk hitungan.']},
+        {name:'Reseller kebutuhan harian',category:'Reseller',description:'Menjual kembali kebutuhan rutin dengan stok awal yang terukur.',equipment:1000000,initialStock:3500000,averagePrice:35000,unitsPerDay:18,activeDays:26,cogsRatio:.75,monthlyFixed:2400000,setupItems:['Rak sederhana dan wadah penyimpanan','Ponsel untuk katalog dan pencatatan pesanan','Stok awal barang cepat habis dari pemasok tepercaya'],launchSteps:['Tanya kebutuhan calon pelanggan sebelum memilih barang.','Bandingkan harga grosir, minimum pembelian, ongkir, dan kebijakan retur.','Mulai dari SKU terbatas; hitung margin setelah ongkir dan biaya transaksi.'],dailyTasks:['Pantau stok dan tanggal kedaluwarsa bila ada.','Catat harga pokok setiap pembelian dan harga jual terbaru.','Pesan ulang berdasarkan barang yang benar-benar laku.'],marketing:['Buat katalog WhatsApp dengan harga dan jadwal antar yang jelas.','Tawarkan paket kebutuhan rutin untuk pelanggan sekitar.'],watchouts:['Stok lambat laku mengikat modal kerja.','Persaingan harga dan ongkir dapat menghabiskan margin tipis.']},
+        {name:'Laundry kiloan kecil',category:'Jasa',description:'Layanan cuci dan setrika skala rumahan dengan biaya per kilogram.',equipment:12000000,initialStock:500000,averagePrice:8000,unitsPerDay:30,activeDays:26,cogsRatio:.18,monthlyFixed:4200000,setupItems:['Mesin cuci dan pengering sesuai kapasitas','Setrika, meja, timbangan, keranjang, dan rak','Detergen, pewangi, plastik kemasan, dan label pelanggan'],launchSteps:['Survei pesaing, tarif, waktu pengerjaan, serta kebutuhan listrik dan air.','Tetapkan prosedur penandaan pakaian dan pencatatan barang masuk.','Mulai dari kapasitas yang sanggup dijaga kualitasnya; uji waktu pengerjaan.'],dailyTasks:['Timbang dan beri label setiap pesanan di depan pelanggan.','Pisahkan cucian, cek noda, dan lakukan pemeriksaan sebelum penyerahan.','Catat berat, biaya bahan, jadwal selesai, dan keluhan.'],marketing:['Tawarkan layanan antar-jemput terbatas di radius dekat.','Buat paket pelanggan rutin dan minta ulasan dari pelanggan awal.'],watchouts:['Kerusakan atau pakaian tertukar menimbulkan biaya penggantian.','Perkirakan kapasitas mesin, listrik, air, perawatan, dan waktu tenaga kerja.']},
+        {name:'Jasa desain digital',category:'Jasa',description:'Pekerjaan desain sederhana untuk UMKM, toko, atau acara lokal.',equipment:6000000,initialStock:0,averagePrice:500000,unitsPerDay:12,activeDays:1,cogsRatio:.1,monthlyFixed:1200000,setupItems:['Laptop atau komputer yang mampu menjalankan perangkat desain','Koneksi internet dan penyimpanan cadangan berkas','Contoh portofolio serta perangkat lunak sesuai kebutuhan'],launchSteps:['Pilih layanan spesifik, misalnya menu, poster promosi, atau konten media sosial.','Susun portofolio contoh dan paket harga dengan batas revisi yang jelas.','Tentukan alur brief, uang muka, tenggat, dan serah-terima berkas.'],dailyTasks:['Konfirmasi kebutuhan klien dan jadwal sebelum mulai bekerja.','Simpan versi desain dan catatan revisi secara teratur.','Catat jam kerja agar harga jasa tetap sepadan dengan waktu.'],marketing:['Tawarkan paket awal ke UMKM lokal dengan contoh hasil yang relevan.','Tampilkan portofolio dan testimoni di kanal digital yang sesuai.'],watchouts:['Jumlah proyek tidak selalu stabil setiap bulan.','Perhitungkan waktu revisi, biaya perangkat lunak, internet, dan pajak.']},
+        {name:'Warung sarapan sederhana',category:'Makanan',description:'Menu sarapan terbatas dengan perputaran bahan setiap hari.',equipment:4000000,initialStock:1500000,averagePrice:15000,unitsPerDay:32,activeDays:26,cogsRatio:.45,monthlyFixed:3000000,setupItems:['Kompor, panci, wajan, dan alat saji','Meja kerja, wadah bahan, dan perlengkapan kebersihan','Bahan baku awal yang sesuai menu dan jumlah produksi'],launchSteps:['Amati jam ramai, pesaing, serta menu yang dicari di lokasi.','Pilih sedikit menu dan hitung porsi, HPP, serta waktu penyajian.','Uji penjualan kecil untuk memperkirakan jumlah masak agar sisa minimal.'],dailyTasks:['Belanja dan siapkan bahan sesuai perkiraan penjualan harian.','Jaga kebersihan makanan dan catat bahan sisa atau terbuang.','Rekap porsi terjual, omzet, dan kebutuhan belanja esok hari.'],marketing:['Gunakan papan menu yang mudah dibaca dari jalan.','Tawarkan paket sarapan dan pesanan awal ke warga atau kantor sekitar.'],watchouts:['Bahan mudah rusak dan penjualan terkonsentrasi pada jam singkat.','Periksa kebutuhan izin, keamanan pangan, sewa, dan biaya bahan bakar.']}
+      ];
+      const additionalIdeaPlans={
+        Makanan:{setupItems:['Peralatan produksi dan wadah penyimpanan sesuai menu','Kemasan, label, dan perlengkapan kebersihan','Bahan awal secukupnya untuk uji pasar'],launchSteps:['Pilih menu terbatas dan hitung HPP per porsi termasuk kemasan.','Uji rasa, harga, waktu produksi, dan jumlah pesanan calon pelanggan.','Cek kebersihan pangan serta izin yang berlaku sebelum berjualan.'],dailyTasks:['Rencanakan produksi dari pesanan dan perkiraan penjualan.','Catat stok, bahan terbuang, dan biaya belanja harian.'],marketing:['Tawarkan tester dan paket ke pelanggan atau usaha sekitar.','Gunakan foto menu, daftar harga, dan pemesanan digital.'],watchouts:['Bahan mudah rusak jika jumlah produksi melebihi permintaan.','Sisihkan biaya gas, kemasan, ongkir, dan barang tidak terjual.']},
+        Minuman:{setupItems:['Alat racik dan alat ukur takaran','Pendingin atau cooler sesuai kebutuhan','Cup, tutup, es, dan bahan minuman awal'],launchSteps:['Tetapkan resep dan takaran untuk setiap menu.','Hitung HPP termasuk cup, es, topping, dan biaya layanan.','Tes penjualan di waktu ramai sebelum mengambil sewa jangka panjang.'],dailyTasks:['Jaga kebersihan alat dan suhu bahan.','Siapkan stok harian dan catat bahan tersisa.'],marketing:['Tawarkan paket bundel dan menu unggulan.','Pasang daftar menu di kanal lokal dan media sosial.'],watchouts:['Bahan segar dan es perlu penyimpanan yang benar.','Hitung listrik, sewa, dan biaya layanan antar.']},
+        Reseller:{setupItems:['Rak atau wadah stok sederhana','Ponsel untuk katalog dan pencatatan pesanan','Stok awal dari pemasok yang bisa diverifikasi'],launchSteps:['Tanya kebutuhan pelanggan sebelum memilih barang.','Bandingkan harga grosir, minimum pembelian, ongkir, dan retur.','Mulai dari SKU terbatas lalu tambah berdasarkan penjualan nyata.'],dailyTasks:['Catat barang masuk, barang terjual, dan stok tersisa.','Cek tanggal kedaluwarsa serta harga pemasok.'],marketing:['Bagikan katalog WhatsApp dengan harga dan jadwal antar jelas.','Tawarkan paket kebutuhan rutin kepada pelanggan sekitar.'],watchouts:['Stok lambat laku mengikat modal kerja.','Ongkir dan diskon dapat menggerus margin reseller.']},
+        Ritel:{setupItems:['Rak, meja pelayanan, dan alat pencatatan','Perlengkapan kemasan atau operasional sesuai barang','Stok pembuka dan tempat penyimpanan yang aman'],launchSteps:['Survei pesaing, harga, dan barang yang sering dicari di lokasi.','Pilih stok awal berdasarkan perputaran dan umur simpan.','Hitung margin setelah ongkir, komisi, dan barang rusak.'],dailyTasks:['Rekap penjualan dan cek stok minimum.','Pesan ulang produk yang terbukti cepat berputar.'],marketing:['Cantumkan daftar harga dan jam layanan dengan jelas.','Gunakan paket, program pelanggan tetap, atau layanan antar lokal.'],watchouts:['Barang lambat laku dapat menahan modal terlalu lama.','Pertimbangkan keamanan, sewa, listrik, dan biaya transaksi.']},
+        Jasa:{setupItems:['Peralatan kerja sesuai layanan yang ditawarkan','Perlengkapan keselamatan, kebersihan, dan perawatan alat','Ponsel atau laptop untuk jadwal dan komunikasi pelanggan'],launchSteps:['Tentukan jenis layanan, wilayah layanan, dan harga per pekerjaan.','Uji waktu pengerjaan dan hitung biaya bahan serta transportasi.','Buat prosedur pemesanan, pembayaran, komplain, dan garansi layanan.'],dailyTasks:['Konfirmasi jadwal dan kebutuhan pelanggan sebelum bekerja.','Cek alat, catat bahan terpakai, dan simpan bukti pekerjaan.'],marketing:['Tampilkan portofolio atau hasil sebelum-sesudah dengan izin pelanggan.','Mulai dari jaringan lokal dan minta ulasan pelanggan awal.'],watchouts:['Jumlah pesanan dapat berubah dari bulan ke bulan.','Sisihkan waktu dan biaya untuk revisi, perawatan, dan transportasi.']},
+        Budidaya:{setupItems:['Wadah atau area produksi sesuai skala awal','Media tanam, bibit, pakan, atau bahan pembudidayaan','Alat ukur, penyiraman, dan perlengkapan kebersihan'],launchSteps:['Pelajari siklus produksi, kebutuhan lingkungan, dan risiko gagal panen.','Mulai dengan batch kecil serta catat biaya dan waktu sampai siap jual.','Cari calon pembeli sebelum meningkatkan kapasitas.'],dailyTasks:['Periksa kondisi budidaya dan catat pemakaian bahan.','Pisahkan produk layak jual dan produk rusak.'],marketing:['Tawarkan sampel atau paket langganan kepada pembeli lokal.','Gunakan foto proses dan informasi ukuran atau kualitas produk.'],watchouts:['Waktu panen dan permintaan dapat berubah; perlu modal kerja.','Pelajari hama, penyakit, cuaca, dan penyimpanan hasil.']},
+        Kreatif:{setupItems:['Peralatan produksi atau perangkat kerja sesuai produk','Bahan, contoh produk, dan kemasan awal','Ponsel atau laptop untuk katalog dan pemesanan'],launchSteps:['Pilih produk khusus dan buat contoh dengan biaya yang terukur.','Tentukan harga, batas kustomisasi, waktu pengerjaan, dan uang muka.','Uji minat lewat pre-order sebelum menambah persediaan.'],dailyTasks:['Catat pesanan, bahan, tenggat, dan status pengerjaan.','Periksa kualitas produk sebelum dikemas.'],marketing:['Tampilkan katalog dan proses pembuatan di kanal visual.','Tawarkan pilihan personalisasi atau paket acara.'],watchouts:['Produk kustom memerlukan waktu dan bisa memiliki banyak revisi.','Perhitungkan ongkos kirim, bahan sisa, dan waktu kerja sendiri.']}
+      };
+      const additionalBusinessModels=[
+        {name:'Frozen food reseller',category:'Reseller',description:'Menjual makanan beku dari pemasok dengan penyimpanan dingin.',equipment:1800000,initialStock:5000000,averagePrice:45000,unitsPerDay:12,activeDays:26,cogsRatio:.72,monthlyFixed:2200000},
+        {name:'Kue basah pre-order',category:'Makanan',description:'Menerima pesanan kue harian untuk rapat, acara, atau tetangga.',equipment:2200000,initialStock:1200000,averagePrice:9000,unitsPerDay:42,activeDays:25,cogsRatio:.36,monthlyFixed:2200000},
+        {name:'Rice bowl rumahan',category:'Makanan',description:'Menu makan siang satu porsi dengan pilihan lauk terbatas.',equipment:5200000,initialStock:2100000,averagePrice:28000,unitsPerDay:28,activeDays:26,cogsRatio:.42,monthlyFixed:4200000},
+        {name:'Katering makan siang',category:'Makanan',description:'Paket makan siang untuk kantor, komunitas, atau acara kecil.',equipment:4800000,initialStock:2300000,averagePrice:30000,unitsPerDay:35,activeDays:22,cogsRatio:.48,monthlyFixed:5000000},
+        {name:'Gerobak kopi sederhana',category:'Minuman',description:'Kopi dan minuman dasar dengan lokasi jual yang ramai.',equipment:6800000,initialStock:1800000,averagePrice:20000,unitsPerDay:32,activeDays:26,cogsRatio:.3,monthlyFixed:3600000},
+        {name:'Agen pulsa dan token',category:'Reseller',description:'Menjual pulsa, paket data, dan token melalui ponsel.',equipment:500000,initialStock:1800000,averagePrice:50000,unitsPerDay:32,activeDays:26,cogsRatio:.95,monthlyFixed:800000},
+        {name:'Thrift pakaian pilihan',category:'Ritel',description:'Menjual pakaian preloved terpilih secara daring atau dari rumah.',equipment:1800000,initialStock:5000000,averagePrice:85000,unitsPerDay:9,activeDays:24,cogsRatio:.58,monthlyFixed:2500000},
+        {name:'Aksesori ponsel',category:'Ritel',description:'Menjual kabel, casing, pelindung layar, dan aksesori populer.',equipment:1300000,initialStock:4200000,averagePrice:45000,unitsPerDay:11,activeDays:26,cogsRatio:.68,monthlyFixed:2600000},
+        {name:'Toko alat tulis kecil',category:'Ritel',description:'Menyediakan alat tulis dan kebutuhan sekolah yang cepat berputar.',equipment:2300000,initialStock:5200000,averagePrice:18000,unitsPerDay:30,activeDays:26,cogsRatio:.7,monthlyFixed:2600000},
+        {name:'Agen sayur dan buah',category:'Ritel',description:'Menjual bahan segar harian dengan belanja stok terencana.',equipment:1800000,initialStock:2500000,averagePrice:25000,unitsPerDay:25,activeDays:26,cogsRatio:.72,monthlyFixed:2400000},
+        {name:'Jasa les privat',category:'Jasa',description:'Bimbingan belajar per sesi untuk murid di sekitar atau daring.',equipment:1400000,initialStock:300000,averagePrice:80000,unitsPerDay:3,activeDays:22,cogsRatio:.1,monthlyFixed:1400000},
+        {name:'Cuci sepatu rumahan',category:'Jasa',description:'Layanan cuci dan perawatan sepatu dengan pemesanan terjadwal.',equipment:2400000,initialStock:600000,averagePrice:40000,unitsPerDay:7,activeDays:24,cogsRatio:.16,monthlyFixed:1600000},
+        {name:'Pet grooming rumahan',category:'Jasa',description:'Layanan mandi dan perawatan dasar hewan peliharaan.',equipment:6200000,initialStock:1000000,averagePrice:100000,unitsPerDay:4,activeDays:24,cogsRatio:.28,monthlyFixed:3000000},
+        {name:'Jasa permak pakaian',category:'Jasa',description:'Memperbaiki ukuran, ritsleting, dan jahitan pakaian.',equipment:4600000,initialStock:500000,averagePrice:55000,unitsPerDay:7,activeDays:24,cogsRatio:.12,monthlyFixed:2200000},
+        {name:'Bibit tanaman dan sayur',category:'Budidaya',description:'Membudidayakan bibit untuk penghobi dan kebun rumahan.',equipment:2500000,initialStock:1800000,averagePrice:20000,unitsPerDay:25,activeDays:24,cogsRatio:.4,monthlyFixed:1900000},
+        {name:'Tanaman hias rumahan',category:'Budidaya',description:'Menjual tanaman hias dan pot dengan perawatan skala kecil.',equipment:4200000,initialStock:2800000,averagePrice:55000,unitsPerDay:8,activeDays:26,cogsRatio:.48,monthlyFixed:2500000},
+        {name:'Depot air minum isi ulang',category:'Ritel',description:'Melayani isi ulang air minum di lingkungan permukiman.',equipment:22000000,initialStock:2300000,averagePrice:7000,unitsPerDay:55,activeDays:26,cogsRatio:.22,monthlyFixed:5500000},
+        {name:'Fotografi produk UMKM',category:'Jasa',description:'Foto katalog produk sederhana untuk toko lokal dan penjual daring.',equipment:9000000,initialStock:100000,averagePrice:650000,unitsPerDay:14,activeDays:1,cogsRatio:.12,monthlyFixed:2000000},
+        {name:'Hampers dan hadiah custom',category:'Kreatif',description:'Merangkai paket hadiah berdasarkan pesanan dan tema acara.',equipment:2000000,initialStock:2200000,averagePrice:175000,unitsPerDay:3,activeDays:20,cogsRatio:.52,monthlyFixed:1500000},
+        {name:'Aksesori handmade',category:'Kreatif',description:'Membuat aksesori sederhana dalam batch kecil dan sistem pre-order.',equipment:1500000,initialStock:1000000,averagePrice:120000,unitsPerDay:5,activeDays:24,cogsRatio:.45,monthlyFixed:1500000}
+      ];
+      businessIdeaModels.push(...additionalBusinessModels.map(idea=>({...additionalIdeaPlans[idea.category],...idea})));
+      function estimateBusinessIdea(idea){
+        const monthlyRevenue=idea.averagePrice*idea.unitsPerDay*idea.activeDays;
+        const monthlyCogs=Math.round(monthlyRevenue*idea.cogsRatio);
+        const monthlyProfit=monthlyRevenue-monthlyCogs-idea.monthlyFixed;
+        const operatingReserve=monthlyCogs+idea.monthlyFixed;
+        return{...idea,monthlyRevenue,monthlyCogs,monthlyProfit,annualProfit:monthlyProfit*12,operatingReserve,requiredCapital:idea.equipment+idea.initialStock+operatingReserve};
+      }
+      function renderBusinessIdeas(){
+        const budgetText=el('ideaBudget').value.trim();
+        if(!budgetText){el('businessIdeasGrid').innerHTML='';el('ideasSummary').textContent='Masukkan modal yang tersedia untuk melihat ide usaha yang sesuai.';return;}
+        const budget=readCurrencyInput(el('ideaBudget'));
+        if(!Number.isSafeInteger(budget)||budget<=0){el('businessIdeasGrid').innerHTML='';el('ideasSummary').textContent='Masukkan modal dalam rupiah berupa angka lebih dari nol.';return;}
+        const estimates=businessIdeaModels.map(estimateBusinessIdea);
+        const category=el('ideaCategory').value;
+        const categoryIdeas=estimates.filter(idea=>!category||idea.category===category);
+        const affordable=categoryIdeas.filter(idea=>idea.requiredCapital<=budget).sort((left,right)=>right.monthlyProfit-left.monthlyProfit);
+        const selected=affordable.length?affordable:categoryIdeas.slice().sort((left,right)=>left.requiredCapital-right.requiredCapital).slice(0,6);
+        const categoryLabel=category||'semua kategori';
+        el('ideasSummary').textContent=affordable.length?`${affordable.length} ide ${categoryLabel} sesuai modal ${formatCurrency(budget)}; semua ditampilkan dan diurutkan berdasarkan estimasi laba bulanan.`:`Belum ada ide ${categoryLabel} yang sesuai modal ${formatCurrency(budget)}. Berikut hingga enam pilihan terdekat beserta kekurangannya.`;
+        el('businessIdeasGrid').innerHTML=selected.map(idea=>{
+          const shortfall=Math.max(0,idea.requiredCapital-budget);
+          const margin=idea.monthlyRevenue?idea.monthlyProfit/idea.monthlyRevenue*100:0;
+          const volume=idea.activeDays===1?`${idea.unitsPerDay} proyek/bulan`:`${idea.unitsPerDay} transaksi/hari × ${idea.activeDays} hari`;
+          return `<article class="idea-card"><div class="idea-card-header"><div><h2>${escapeHtml(idea.name)}</h2><p class="idea-card-intro">${escapeHtml(idea.description)}</p></div><span class="idea-badge ${shortfall?'short':''}">${shortfall?`Kurang ${formatCompact(shortfall)}`:'Sesuai modal'}</span></div><div class="idea-capital"><div><span>Peralatan</span><strong>${formatCurrency(idea.equipment)}</strong></div><div><span>Stok awal</span><strong>${formatCurrency(idea.initialStock)}</strong></div><div><span>Cadangan 1 bulan</span><strong>${formatCurrency(idea.operatingReserve)}</strong></div></div><div class="idea-metrics"><div><span>Modal awal dibutuhkan</span><strong>${formatCurrency(idea.requiredCapital)}</strong></div><div><span>Perkiraan omzet / bulan</span><strong>${formatCurrency(idea.monthlyRevenue)}</strong></div><div><span>Perkiraan laba / bulan</span><strong class="idea-profit">${formatCurrency(idea.monthlyProfit)}</strong></div><div><span>Proyeksi laba / 12 bulan</span><strong class="idea-profit">${formatCurrency(idea.annualProfit)}</strong></div><div><span>Margin perkiraan</span><strong>${margin.toFixed(1).replace('.',',')}%</strong></div></div><div class="idea-assumptions">Asumsi: ${escapeHtml(volume)}, harga rata-rata ${formatCurrency(idea.averagePrice)}, HPP ${(idea.cogsRatio*100).toFixed(0)}%, biaya rutin ${formatCurrency(idea.monthlyFixed)}/bulan. Cadangan mencakup HPP dan satu bulan biaya rutin. Belum termasuk pajak, bunga pinjaman, atau perubahan permintaan.</div></article>`;
+        }).join('');
+        el('businessIdeasGrid').querySelectorAll('.idea-card').forEach((card,index)=>card.insertAdjacentHTML('beforeend',`<button class="secondary-button idea-plan-button" type="button" data-business-plan="${escapeHtml(selected[index].name)}">Lihat rencana awal</button>`));
+      }
+      function showBusinessPlan(ideaName){
+        const model=businessIdeaModels.find(idea=>idea.name===ideaName);
+        if(!model)return;
+        const idea=estimateBusinessIdea(model);const budget=readCurrencyInput(el('ideaBudget'));const shortfall=Math.max(0,idea.requiredCapital-budget);
+        const listMarkup=items=>items.map(item=>`<li>${escapeHtml(item)}</li>`).join('');
+        el('businessPlanTitle').textContent=`Rencana usaha: ${idea.name}`;
+        el('businessPlanContent').innerHTML=`<p class="idea-card-intro">${escapeHtml(idea.description)}</p><div class="idea-plan-estimate"><div><span>Modal awal dibutuhkan</span><strong>${formatCurrency(idea.requiredCapital)}</strong></div><div><span>Modal tersedia</span><strong>${formatCurrency(budget)}</strong></div><div><span>${shortfall?'Tambahan modal diperlukan':'Sisa setelah modal awal'}</span><strong>${formatCurrency(shortfall||Math.max(0,budget-idea.requiredCapital))}</strong></div><div><span>Proyeksi laba / bulan</span><strong>${formatCurrency(idea.monthlyProfit)}</strong></div><div><span>Proyeksi laba / 12 bulan</span><strong>${formatCurrency(idea.annualProfit)}</strong></div><div><span>Asumsi omzet / bulan</span><strong>${formatCurrency(idea.monthlyRevenue)}</strong></div></div><section class="idea-plan-section"><h3>Peralatan dan kebutuhan awal</h3><ul>${listMarkup(idea.setupItems)}</ul></section><section class="idea-plan-section"><h3>Langkah sebelum mulai</h3><ol>${listMarkup(idea.launchSteps)}</ol></section><section class="idea-plan-section"><h3>Rutinitas operasional</h3><ul>${listMarkup(idea.dailyTasks)}</ul></section><section class="idea-plan-section"><h3>Promosi awal</h3><ul>${listMarkup(idea.marketing)}</ul></section><section class="idea-plan-section"><h3>Hal yang perlu diwaspadai</h3><ul>${listMarkup(idea.watchouts)}</ul></section><p class="idea-assumptions">Simulasi laba mengasumsikan ${idea.unitsPerDay} ${idea.activeDays===1?'proyek per bulan':`transaksi per hari selama ${idea.activeDays} hari`}, harga rata-rata ${formatCurrency(idea.averagePrice)}, HPP ${(idea.cogsRatio*100).toFixed(0)}%, dan biaya rutin ${formatCurrency(idea.monthlyFixed)} per bulan. Proyeksi 12 bulan menganggap kondisi stabil; belum termasuk pajak, bunga pinjaman, atau perubahan permintaan.</p>`;
+        el('businessPlanModal').classList.add('open');
+      }
+      function render(){renderOverview();renderReports();renderProducts();renderPos();renderDebts();}
       function renderSimulation(){
         const priceText=el('simulatorPrice').value.trim();
         const quantityText=el('simulatorQuantity').value.trim();
@@ -556,6 +851,19 @@
             if(item.paidAmount!==undefined&&(!Number.isSafeInteger(Number(item.paidAmount))||Number(item.paidAmount)<0||Number(item.paidAmount)>Number(item.amount)))return false;
             if(item.quantity!==undefined&&(!Number.isSafeInteger(Number(item.quantity))||Number(item.quantity)<=0))return false;
             if(item.cogs!==undefined&&(!Number.isSafeInteger(Number(item.cogs))||Number(item.cogs)<0))return false;
+            if(item.invoiceNumber!==undefined&&(typeof item.invoiceNumber!=='string'||!item.invoiceNumber.trim()))return false;
+            if(item.paymentMethod!==undefined&&(item.type!=='sale'||!['cash','transfer','receivable'].includes(item.paymentMethod)))return false;
+            if(item.cashReceived!==undefined&&(!Number.isSafeInteger(Number(item.cashReceived))||Number(item.cashReceived)<0))return false;
+            if(item.change!==undefined&&(!Number.isSafeInteger(Number(item.change))||Number(item.change)<0))return false;
+            if(item.paymentMethod==='cash'&&(!Number.isSafeInteger(Number(item.cashReceived))||!Number.isSafeInteger(Number(item.change))||Number(item.cashReceived)<Number(item.amount)||Number(item.cashReceived)-Number(item.change)!==Number(item.amount)))return false;
+            if(item.items!==undefined){
+              if(!Array.isArray(item.items)||!item.items.length||!item.items.every(line=>line&&typeof line.productId==='string'&&typeof line.name==='string'&&line.name.trim()&&Number.isSafeInteger(Number(line.quantity))&&Number(line.quantity)>0&&Number.isSafeInteger(Number(line.unitPrice))&&Number(line.unitPrice)>0&&Number.isSafeInteger(Number(line.unitCost))&&Number(line.unitCost)>=0))return false;
+              const subtotal=item.items.reduce((total,line)=>total+Number(line.unitPrice)*Number(line.quantity),0);
+              const cogs=item.items.reduce((total,line)=>total+Number(line.unitCost)*Number(line.quantity),0);
+              const discount=Number(item.discount)||0;
+              if(!Number.isSafeInteger(subtotal)||!Number.isSafeInteger(cogs)||!Number.isSafeInteger(discount)||discount<0||Number(item.subtotal)!==subtotal||Number(item.cogs)!==cogs||Number(item.amount)!==subtotal-discount)return false;
+            }
+            if(item.discount!==undefined&&(!Number.isSafeInteger(Number(item.discount))||Number(item.discount)<0))return false;
             return true;
           });
           const validProducts=Array.isArray(data.products)&&data.products.every(item=>{
@@ -564,6 +872,7 @@
           });
           const validRelations=validTransactions&&validProducts&&data.transactions.every(item=>{
             if(item.productId&&!productIds.has(String(item.productId)))return false;
+            if(Array.isArray(item.items)&&!item.items.every(line=>productIds.has(String(line.productId))))return false;
             if(item.type==='collection'||item.type==='payablePayment'){
               const parent=data.transactions.find(candidate=>candidate.id===item.relatedId);
               return Boolean(parent&&(item.type==='collection'?parent.type==='sale':parent.type==='expense'||parent.type==='stockPurchase'));
@@ -575,28 +884,74 @@
           const validPayments=[...paymentTotals].every(([id,total])=>{const parent=data.transactions.find(item=>item.id===id);return parent&&total<=(parent.paidAmount===undefined?(parent.paid===false?0:Number(parent.amount)):Number(parent.paidAmount));});
           if(data.version!==1||typeof data.demoData!=='boolean'||!validTransactions||!validProducts||!validRelations||!validPayments||!validProfile)throw new Error('format');
           if(!confirm('Pulihkan cadangan ini? Data transaksi, produk, dan profil saat ini akan digantikan.'))return;
-          transactions=data.transactions;products=data.products;profile=data.profile;isDemoData=data.demoData;save();saveProducts();saveProfile();populateSaleProducts();render();showToast('Cadangan berhasil dipulihkan.');
+          transactions=data.transactions;products=data.products;profile=data.profile;posCart=[];isDemoData=data.demoData;save();saveProducts();saveProfile();populateSaleProducts();render();showToast('Cadangan berhasil dipulihkan.');
         }catch(error){if(error.name!=='AbortError')showToast('File cadangan tidak valid atau tidak dapat dibaca.');}
         finally{el('restoreInput').value='';}
       }
       function exportCsv(){
-        const list=filteredByPeriod(selectedPeriod);const rows=[['Tanggal','Keterangan','Jenis','Kategori','Jenis Beban','Omzet / Nominal (IDR)','HPP (IDR)','Laba Transaksi (IDR)'],...list.map(item=>[item.date,item.description,typeLabels[item.type],item.category||'',item.type==='expense'?(item.nature==='fixed'?'Tetap':'Variabel'):'',item.amount,item.type==='sale'?(item.cogs||0):0,item.type==='sale'?item.amount-(item.cogs||0):item.type==='expense'?-item.amount:0])];
+        const list=filteredByPeriod(selectedPeriod);const rows=[['No. Invoice','Tanggal','Keterangan','Jenis','Kategori','Jenis Beban','Nominal (IDR)','Diskon (IDR)','Metode Pembayaran','Uang Diterima (IDR)','Kembalian (IDR)','HPP (IDR)','Laba Transaksi (IDR)'],...list.map(item=>[item.invoiceNumber||'',item.date,item.description,typeLabels[item.type],item.category||'',item.type==='expense'?(item.nature==='fixed'?'Tetap':'Variabel'):'',item.amount,item.discount||0,item.paymentMethod||'',item.cashReceived||0,item.change||0,item.type==='sale'?(item.cogs||0):0,item.type==='sale'?item.amount-(item.cogs||0):item.type==='expense'?-item.amount:0])];
         const csv='\ufeff'+rows.map(row=>row.map(value=>`"${String(value).replace(/"/g,'""')}"`).join(',')).join('\r\n');
         const link=document.createElement('a');link.href=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8'}));link.download=`ruangusaha-${selectedPeriod}.csv`;document.body.appendChild(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(link.href),1000);showToast(`${list.length} transaksi berhasil diekspor.`);
       }
       document.querySelectorAll('.nav-button').forEach(button=>button.addEventListener('click',()=>{
         const view=button.dataset.view;document.querySelectorAll('.nav-button').forEach(nav=>{nav.classList.toggle('active',nav===button);if(nav===button)nav.setAttribute('aria-current','page');else nav.removeAttribute('aria-current');});
         document.querySelectorAll('.view').forEach(section=>section.classList.toggle('active',section.id===`view-${view}`));
-        el('breadcrumb').textContent={overview:'Ringkasan',transactions:'Transaksi',debts:'Utang & piutang',products:'Produk & stok',reports:'Analitik & laporan',simulator:'Simulasi'}[view];
+        el('breadcrumb').textContent={overview:'Ringkasan',pos:'Kasir',transactions:'Transaksi',debts:'Utang & piutang',products:'Produk & stok',reports:'Analitik & laporan',simulator:'Simulasi',ideas:'Ide usaha'}[view];
       }));
       document.querySelectorAll('[data-navigate="transactions"]').forEach(button=>button.addEventListener('click',()=>document.querySelector('[data-view="transactions"]').click()));
       periodInput.addEventListener('change',()=>{if(/^\d{4}-\d{2}$/.test(periodInput.value)){selectedPeriod=periodInput.value;render();}});
       el('addSale').addEventListener('click',()=>openModal('sale'));el('addTransaction').addEventListener('click',()=>openModal('sale'));
+      el('posManualSale').addEventListener('click',()=>openModal('sale'));
+      el('posAddProduct').addEventListener('click',()=>el('addProduct').click());
+      el('posSearch').addEventListener('input',renderPos);
+      el('posDiscount').addEventListener('input',renderPosTotals);
+      el('posProducts').addEventListener('click',event=>{const button=event.target.closest('[data-pos-add]');if(button)changePosQuantity(button.dataset.posAdd,1);});
+      el('posCartItems').addEventListener('click',event=>{
+        const button=event.target.closest('[data-pos-dec],[data-pos-inc],[data-pos-remove]');if(!button)return;
+        const productId=button.dataset.posDec||button.dataset.posInc||button.dataset.posRemove;
+        if(button.hasAttribute('data-pos-remove')){posCart=posCart.filter(line=>String(line.productId)!==String(productId));renderPos();return;}
+        changePosQuantity(productId,button.hasAttribute('data-pos-inc')?1:-1);
+      });
+      el('posClear').addEventListener('click',()=>{posCart=[];renderPos();});
+      el('posPayment').addEventListener('change',updatePosPaymentFields);
+      el('posCashReceived').addEventListener('input',renderPosTotals);
+      el('printInvoice').addEventListener('click',()=>window.print());
+      document.addEventListener('click',event=>{const button=event.target.closest('[data-invoice]');if(!button)return;const item=transactions.find(entry=>String(entry.id)===button.dataset.invoice);if(item)showInvoice(item);});
+      el('posCheckout').addEventListener('submit',event=>{
+        event.preventDefault();
+        const lines=posCart.map(line=>{const product=products.find(item=>String(item.id)===String(line.productId));return product?{product,quantity:Number(line.quantity)}:null;});
+        if(!lines.length||lines.some(line=>!line||!Number.isSafeInteger(line.quantity)||line.quantity<=0||line.quantity>line.product.stock)){showToast('Periksa kembali produk dan stok di keranjang.');renderPos();return;}
+        const items=lines.map(({product,quantity})=>({productId:product.id,name:product.name,quantity,unitPrice:Number(product.price),unitCost:Number(product.cost)}));
+        const subtotal=items.reduce((total,line)=>total+line.unitPrice*line.quantity,0);const cogs=items.reduce((total,line)=>total+line.unitCost*line.quantity,0);const discount=readCurrencyInput(el('posDiscount'));const amount=subtotal-discount;
+        if(!Number.isSafeInteger(subtotal)||!Number.isSafeInteger(cogs)||!Number.isSafeInteger(discount)||discount<0||discount>=subtotal||!Number.isSafeInteger(amount)||amount<=0){showToast('Diskon harus lebih kecil dari subtotal dan total penjualan harus valid.');return;}
+        const paymentMethod=el('posPayment').value;const unpaid=paymentMethod==='unpaid';const dueDate=el('posDueDate').value;const cashReceived=paymentMethod==='cash'?readCurrencyInput(el('posCashReceived')):0;
+        if(paymentMethod==='cash'&&(!Number.isSafeInteger(cashReceived)||cashReceived<amount)){showToast('Uang diterima belum cukup untuk membayar total.');el('posCashReceived').focus();return;}
+        if(unpaid&&!dueDate){showToast('Masukkan tanggal jatuh tempo piutang.');el('posDueDate').focus();return;}
+        if(!prepareForRealEntry())return;
+        const customer=el('posCustomer').value.trim();const item={id:`${Date.now()}-${Math.random().toString(36).slice(2,8)}`,invoiceNumber:`INV-${localDate(new Date()).replace(/-/g,'')}-${Math.random().toString(36).slice(2,6).toUpperCase()}`,date:localDate(new Date()),type:'sale',description:`Penjualan kasir${customer?` · ${customer}`:` · ${items.length} produk`}`,customer,category:'Produk',amount,subtotal,discount,cogs,items,paymentMethod:unpaid?'receivable':paymentMethod,cashReceived,change:paymentMethod==='cash'?cashReceived-amount:0,paidAmount:unpaid?0:amount};
+        if(unpaid)item.dueDate=dueDate;
+        for(const line of items){const product=products.find(entry=>String(entry.id)===String(line.productId));product.stock-=line.quantity;}
+        transactions.push(item);isDemoData=false;save();saveProducts();selectedPeriod=item.date.slice(0,7);periodInput.value=selectedPeriod;posCart=[];el('posCheckout').reset();el('posPayment').value='cash';updatePosPaymentFields();render();showToast(`Penjualan tersimpan · laba kotor ${formatCurrency(amount-cogs)} · ${items.length} produk.`);showInvoice(item);
+      });
       el('addReceivable').addEventListener('click',()=>openModal('sale','unpaid'));
       el('addPayable').addEventListener('click',()=>openModal('expense','unpaid'));
       el('workspaceButton').addEventListener('click',openWorkspace);
+      el('guideButton').addEventListener('click',openGuide);
+      el('guideTopic').addEventListener('change',renderGuide);
+      el('ideaBudget').addEventListener('input',renderBusinessIdeas);
+      el('findBusinessIdeas').addEventListener('click',renderBusinessIdeas);
+      el('ideaCategory').addEventListener('change',renderBusinessIdeas);
+      el('businessIdeasGrid').addEventListener('click',event=>{const button=event.target.closest('[data-business-plan]');if(button)showBusinessPlan(button.dataset.businessPlan);});
       el('profileForm').addEventListener('submit',event=>{event.preventDefault();profile={businessName:el('businessName').value.trim(),owner:el('businessOwner').value.trim(),address:el('businessAddress').value.trim()};saveProfile();renderReports();el('workspaceModal').classList.remove('open');showToast('Profil usaha berhasil disimpan.');});
       el('backupExport').addEventListener('click',downloadBackup);
+      el('clearRecords').insertAdjacentHTML('afterend','<button class="secondary-button" id="resetBusinessData" type="button" style="display:flex;margin-top:8px;color:#b1473f;border-color:#e8cbc6">Reset seluruh data usaha</button>');
+      el('resetBusinessData').addEventListener('click',()=>{
+        if(!confirm('Reset seluruh data usaha? Semua transaksi, menu/produk, stok, dan profil akan dihapus permanen. Unduh cadangan lengkap terlebih dahulu jika masih diperlukan.'))return;
+        transactions=[];products=[];profile={businessName:'',owner:'',address:''};posCart=[];isDemoData=false;
+        selectedPeriod=monthKey(new Date());periodInput.value=selectedPeriod;el('transactionSearch').value='';el('profileForm').reset();
+        save();saveProducts();saveProfile();populateSaleProducts();render();el('workspaceModal').classList.remove('open');
+        showToast('Seluruh data usaha berhasil direset. Tambahkan menu untuk mulai kembali.');
+      });
       el('clearRecords').addEventListener('click',()=>{
         if(!transactions.length){showToast('Belum ada catatan transaksi untuk dihapus.');return;}
         const message=`Hapus semua ${transactions.length} catatan transaksi, termasuk pembayaran, piutang, dan utang? Produk, jumlah stok saat ini, dan profil usaha akan tetap tersimpan. Tindakan ini tidak dapat dibatalkan. Unduh cadangan terlebih dahulu jika catatan masih diperlukan.`;
@@ -614,13 +969,13 @@
       el('entryQuantity').addEventListener('input',updateProductSaleFields);
       el('addProduct').addEventListener('click',()=>{editingProductId=null;el('productForm').reset();el('productStock').value='0';el('productStock').readOnly=false;el('productModalTitle').textContent='Tambah produk';renderPriceSuggestions();el('productModal').classList.add('open');el('productName').focus();});
       document.querySelectorAll('[data-close]').forEach(button=>button.addEventListener('click',()=>el(button.dataset.close).classList.remove('open')));
-      ['workspaceModal','productModal','restockModal','paymentModal'].forEach(id=>el(id).addEventListener('click',event=>{if(event.target===el(id))el(id).classList.remove('open');}));
+      ['workspaceModal','productModal','restockModal','paymentModal','invoiceModal','guideModal','businessPlanModal'].forEach(id=>el(id).addEventListener('click',event=>{if(event.target===el(id))el(id).classList.remove('open');}));
       el('productForm').addEventListener('submit',event=>{
         event.preventDefault();const price=readCurrencyInput(el('productPrice'));const cost=readCurrencyInput(el('productCost'));const stock=Number(el('productStock').value);
         const name=el('productName').value.trim();const existing=products.find(item=>item.id===editingProductId);const duplicate=products.some(item=>item.id!==editingProductId&&item.name.toLocaleLowerCase('id')===name.toLocaleLowerCase('id'));
         if(!name||duplicate||!Number.isSafeInteger(price)||price<=0||!Number.isSafeInteger(cost)||cost<0||!Number.isSafeInteger(stock)||stock<0||!Number.isSafeInteger(cost*stock)){showToast('Periksa nama produk, harga, modal, dan stok awal.');return;}
         if(existing){existing.name=name;existing.price=price;existing.cost=cost;}else products.push({id:`${Date.now()}-${Math.random().toString(36).slice(2,8)}`,name,price,cost,stock});
-        editingProductId=null;el('productStock').readOnly=false;saveProducts();renderProducts();el('productModal').classList.remove('open');showToast('Produk berhasil disimpan.');
+        editingProductId=null;el('productStock').readOnly=false;saveProducts();renderProducts();renderPos();el('productModal').classList.remove('open');showToast('Produk berhasil disimpan.');
       });
       el('restockForm').addEventListener('submit',event=>{
         event.preventDefault();const product=products.find(item=>String(item.id)===el('restockProduct').value);const quantity=Number(el('restockQuantity').value);const unitCost=readCurrencyInput(el('restockCost'));
@@ -639,13 +994,13 @@
         const deleteButton=event.target.closest('[data-product-delete]');
         if(!deleteButton)return;
         const product=products.find(item=>String(item.id)===deleteButton.dataset.productDelete);if(!product)return;
-        if(transactions.some(item=>item.productId===product.id)){showToast('Produk memiliki riwayat transaksi dan tidak dapat dihapus.');return;}
+        if(transactions.some(item=>item.productId===product.id||item.items?.some(line=>String(line.productId)===String(product.id)))){showToast('Produk memiliki riwayat transaksi dan tidak dapat dihapus.');return;}
         if(!confirm(`Hapus produk “${product.name}”?`))return;
-        products=products.filter(item=>item!==product);saveProducts();renderProducts();populateSaleProducts();showToast('Produk dihapus.');
+        products=products.filter(item=>item!==product);saveProducts();renderProducts();renderPos();populateSaleProducts();showToast('Produk dihapus.');
       });
       ['simulatorPrice','simulatorQuantity','simulatorCapital'].forEach(id=>el(id).addEventListener('input',renderSimulation));
       el('modalBackdrop').addEventListener('click',event=>{if(event.target===el('modalBackdrop'))closeModal();});
-      document.addEventListener('keydown',event=>{if(event.key==='Escape'){['modalBackdrop','workspaceModal','productModal','restockModal','paymentModal'].forEach(id=>el(id).classList.remove('open'));}});
+      document.addEventListener('keydown',event=>{if(event.key==='Escape'){['modalBackdrop','workspaceModal','productModal','restockModal','paymentModal','invoiceModal','guideModal','businessPlanModal'].forEach(id=>el(id).classList.remove('open'));}});
       document.addEventListener('click',event=>{
         const button=event.target.closest('[data-delete]');if(!button)return;
         const item=transactions.find(transaction=>String(transaction.id)===button.dataset.delete);if(!item)return;
@@ -653,6 +1008,7 @@
         if(transactions.some(transaction=>transaction.relatedId===item.id)){showToast('Transaksi memiliki riwayat pembayaran. Hapus pembayaran terkait terlebih dahulu.');return;}
         if(!confirm(`Hapus transaksi “${item.description}”?`))return;
         if(item.productId){const product=products.find(entry=>entry.id===item.productId);if(product){product.stock+=Number(item.quantity)||0;saveProducts();}}
+        if(Array.isArray(item.items)){for(const line of item.items){const product=products.find(entry=>String(entry.id)===String(line.productId));if(product)product.stock+=Number(line.quantity)||0;}saveProducts();}
         if(item.relatedId){const parent=transactions.find(transaction=>transaction.id===item.relatedId);if(parent)parent.paidAmount=Math.max(0,getPaidAmount(parent)-Number(item.amount));}
         transactions=transactions.filter(transaction=>transaction!==item);save();render();showToast('Transaksi dihapus.');
       });
