@@ -24,6 +24,9 @@
     @media(max-width:360px){.period-input{width:112px}.crumb{font-size:9px}.brand{gap:6px}.brand-name{font-size:13px}.nav{max-width:calc(100vw - 148px)}}
     @media print{@page{margin:12mm}body{background:#fff;color:#111;-webkit-print-color-adjust:exact;print-color-adjust:exact}.sidebar,.topbar,.heading-actions,.toast,.modal-backdrop{display:none!important}.main{margin:0;min-height:0}.page{max-width:none;padding:0}.view{display:none!important}#view-reports{display:block!important}#view-reports .page-heading{display:block;margin-bottom:16px}#view-reports .panel{box-shadow:none;break-inside:avoid}#view-reports .table-scroll{overflow:visible}#view-reports table{white-space:normal;font-size:9px}#view-reports tbody tr{break-inside:avoid}#view-reports .report-grid{grid-template-columns:1fr}.metric{min-height:auto}.metric-value{font-size:17px}}
   </style>
+  <link rel="manifest" href="./manifest.webmanifest">
+  <link rel="icon" type="image/svg+xml" href="./icons/icon.svg">
+  <link rel="apple-touch-icon" href="./icons/icon.svg">
 </head>
 <body>
   <div class="shell">
@@ -1053,5 +1056,43 @@
       save();render();renderSimulation();
     })();
   </script>
+
+  <script>
+  (() => {
+    if ("serviceWorker" in navigator) {
+      window.addEventListener("load", () => {
+        navigator.serviceWorker.register("./sw.js").catch((error) => {
+          console.error("RuangUsaha PWA: service worker registration failed", error);
+        });
+      });
+    }
+
+    let deferredInstallPrompt = null;
+    const installButton = document.createElement("button");
+    installButton.type = "button";
+    installButton.textContent = "Install aplikasi";
+    installButton.setAttribute("aria-label", "Install RuangUsaha");
+    installButton.hidden = true;
+    installButton.style.cssText = "position:fixed;right:18px;bottom:18px;z-index:1000;padding:11px 15px;border:0;border-radius:8px;background:#174e39;color:#fff;font:600 12px 'DM Sans',sans-serif;box-shadow:0 8px 24px rgba(27,40,35,.18);cursor:pointer";
+    document.addEventListener("DOMContentLoaded", () => document.body.appendChild(installButton));
+    window.addEventListener("beforeinstallprompt", (event) => {
+      event.preventDefault();
+      deferredInstallPrompt = event;
+      installButton.hidden = false;
+    });
+    installButton.addEventListener("click", async () => {
+      if (!deferredInstallPrompt) return;
+      deferredInstallPrompt.prompt();
+      await deferredInstallPrompt.userChoice;
+      deferredInstallPrompt = null;
+      installButton.hidden = true;
+    });
+    window.addEventListener("appinstalled", () => {
+      deferredInstallPrompt = null;
+      installButton.hidden = true;
+    });
+  })();
+  </script>
+
 </body>
 </html>
