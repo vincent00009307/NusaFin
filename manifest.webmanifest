@@ -1,0 +1,26 @@
+{
+  "id": "./",
+  "name": "RuangUsaha — Keuangan UMKM",
+  "short_name": "RuangUsaha",
+  "description": "Buku kas digital untuk membantu UMKM mengelola transaksi, stok, dan laporan usaha.",
+  "lang": "id-ID",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "theme_color": "#172822",
+  "background_color": "#f5f6f2",
+  "categories": [
+    "finance",
+    "business",
+    "productivity"
+  ],
+  "icons": [
+    {
+      "src": "./icons/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}
