@@ -845,7 +845,7 @@
         try{
           const data=JSON.parse(await file.text());
           const validTypes=['sale','expense','capital','withdrawal','stockPurchase','collection','payablePayment'];
-          const validDate=value=>typeof value==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(value)&&!Number.isNaN(new Date(`${value}T00:00:00`).getTime())&&new Date(`${value}T00:00:00`).toISOString().slice(0,10)===value;
+          const validDate=value=>{if(typeof value!=='string'||!/^\d{4}-\d{2}-\d{2}$/.test(value))return false;const date=new Date(`${value}T00:00:00Z`);return !Number.isNaN(date.getTime())&&date.toISOString().slice(0,10)===value;};
           const transactionIds=new Set();const productIds=new Set();
           const validTransactions=Array.isArray(data.transactions)&&data.transactions.every(item=>{
             if(!item||typeof item.id!=='string'||transactionIds.has(item.id)||!validDate(item.date)||!validTypes.includes(item.type)||typeof item.description!=='string'||!Number.isSafeInteger(Number(item.amount))||Number(item.amount)<0)return false;
@@ -893,7 +893,8 @@
       }
       function exportCsv(){
         const list=filteredByPeriod(selectedPeriod);const rows=[['No. Invoice','Tanggal','Keterangan','Jenis','Kategori','Jenis Beban','Nominal (IDR)','Diskon (IDR)','Metode Pembayaran','Uang Diterima (IDR)','Kembalian (IDR)','HPP (IDR)','Laba Transaksi (IDR)'],...list.map(item=>[item.invoiceNumber||'',item.date,item.description,typeLabels[item.type],item.category||'',item.type==='expense'?(item.nature==='fixed'?'Tetap':'Variabel'):'',item.amount,item.discount||0,item.paymentMethod||'',item.cashReceived||0,item.change||0,item.type==='sale'?(item.cogs||0):0,item.type==='sale'?item.amount-(item.cogs||0):item.type==='expense'?-item.amount:0])];
-        const csv='\ufeff'+rows.map(row=>row.map(value=>`"${String(value).replace(/"/g,'""')}"`).join(',')).join('\r\n');
+        const csvCell=value=>{let text=String(value??'');if(typeof value==='string'&&/^[\t\r ]*[=+@-]/.test(text))text="'"+text;return `"${text.replace(/"/g,'""')}"`;};
+        const csv='\ufeff'+rows.map(row=>row.map(csvCell).join(',')).join('\r\n');
         const link=document.createElement('a');link.href=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8'}));link.download=`ruangusaha-${selectedPeriod}.csv`;document.body.appendChild(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(link.href),1000);showToast(`${list.length} transaksi berhasil diekspor.`);
       }
       document.querySelectorAll('.nav-button').forEach(button=>button.addEventListener('click',()=>{
